@@ -1,0 +1,47 @@
+# Local environments, caches, and editor/OS files
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.DS_Store
+.idea/
+.vscode/
+
+# Local secrets and runtime logs
+.env
+.env.*
+*.log
+debug_*.txt
+
+# Generated analysis and historical working data
+graphify-out/
+Archive/
+
+# Policy sources and other client-data documents, regardless of location
+fixtures/
+*.pdf
+*.doc
+*.docx
+*.tif
+*.tiff
+*.csv
+*.tsv
+*.xls
+*.xlsx
+
+# All generated/intermediate policy results
+outputs/
+tmp/
+*.json
+
+# The schema is the only JSON file intended for version control
+!insurance_schema_v3.json
+
+# This regression test embeds client names, customer codes, and birth dates
+tests/test_gnp_dynamic_pipeline.py

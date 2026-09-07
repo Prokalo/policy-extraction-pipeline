@@ -1,0 +1,230 @@
+# GNP Policy Extraction Pipeline
+
+A hybrid extraction pipeline that converts Spanish-language GNP medical insurance policy PDFs into structured, provenance-aware, schema-validated JSON.
+
+The pipeline combines:
+
+- **Docling** for PDF layout and table extraction.
+- **Ollama** for schema-constrained extraction from page-level evidence.
+- **PyMuPDF** for deterministic GNP-specific parsing and repair.
+- **JSON Schema** plus business rules for final validation and SQL-readiness checks.
+
+The current implementation targets the layouts and terminology found in GNP policies. It dynamically discovers insured certificate blocks, so it is not limited to a fixed number of insured people.
+
+## Pipeline overview
+
+```mermaid
+flowchart LR
+    PDF[Policy PDF] --> D[Docling conversion]
+    D --> DJ[01_docling.json]
+    DJ --> L[Ollama structured extraction]
+    L --> EJ[02_extracted.json]
+    EJ --> G[GNP deterministic parser]
+    PDF --> G
+    G --> C[Coverage repair]
+    C --> PC[Condition cleanup]
+    PC --> M[Metadata normalization]
+    M --> V[Schema and business validation]
+    PDF --> V
+    V --> O[Validated JSON]
+```
+
+The GNP parser is deliberately deterministic where the PDF layout is reliable. It re-reads the source PDF to repair coverage rows, route and deduplicate conditions, reconstruct foreign-care rules, extract document sections, and normalize page-one metadata. The LLM is used for constrained extraction rather than as the final authority.
+
+## Requirements
+
+- Python 3.14 is used by the included local virtual environment.
+- [Ollama](https://ollama.com/) must be installed and running.
+- The default Ollama model is `qwen3:8b`.
+- Runtime Python packages: `docling`, `ollama`, `pymupdf`, and `jsonschema`.
+
+This repository currently has no dependency manifest or lock file. To create an environment manually:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install docling ollama pymupdf jsonschema
+ollama pull qwen3:8b
+```
+
+`process_policy.py` also attempts to add packages from the repository's `.venv` to `sys.path`, but activating the environment is recommended.
+
+## Usage
+
+Run the complete pipeline from the repository root:
+
+```bash
+python process_policy.py path/to/policy.pdf
+```
+
+For example:
+
+```bash
+python process_policy.py fixtures/poliza_1_asegurado.pdf
+```
+
+Use a different Ollama model or schema:
+
+```bash
+python process_policy.py path/to/policy.pdf \
+  --model qwen3:8b \
+  --schema insurance_schema_v3.json
+```
+
+Reuse an existing Docling conversion to skip the PDF-to-Docling stage:
+
+```bash
+python process_policy.py path/to/policy.pdf \
+  --docling-json tmp/runs/<previous-run>/01_docling.json
+```
+
+The original PDF is still required when `--docling-json` is supplied because the GNP parser and validator inspect it directly.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Validation passed and the result is marked SQL-ready. |
+| `1` | Processing completed, but at least one high-severity warning remains or the result is not SQL-ready. |
+| `2` | The PDF was not found or the pipeline raised an exception. |
+
+## Outputs
+
+Each invocation creates a timestamped diagnostic directory:
+
+```text
+tmp/runs/<pdf-name>_<YYYYMMDD_HHMMSS>/
+├── 01_docling.json
+├── 02_extracted.json
+├── 03_gnp_coverages.json
+├── 04_gnp_cleaned.json
+├── 05_gnp_normalized.json
+└── debug_*.txt              # only when an Ollama call fails
+```
+
+The final result is written to:
+
+```text
+outputs/<pdf-name>_validated.json
+```
+
+Reprocessing the same PDF creates a new run directory but overwrites its final file in `outputs/`.
+
+## Output model
+
+`insurance_schema_v3.json` defines the final contract. Its top-level fields are:
+
+| Field | Contents |
+| --- | --- |
+| `document` | Document type, language, and page count. |
+| `policy` | Policy identifiers, plan, term, dates, currency, and movement data. |
+| `policyholder` | Customer identity and contact information. |
+| `premium_summary` | Policy-level premium, surcharge, fee, tax, total, and payment data. |
+| `agent` | Agent name and code. |
+| `insureds` | Dynamically discovered insured people, premiums, coverages, conditions, and source pages. |
+| `policy_conditions` | Normalized policy- and insured-applicable conditions and rules. |
+| `regulatory` | Registration number, date, and source page. |
+| `document_sections` | Additional extracted policy sections. |
+| `validation` | Warnings and the final severity/SQL-readiness summary. |
+
+Monetary values retain both source text and normalized numeric/currency fields where the schema requires them. Extracted records carry `source_page` or related page lists so their provenance can be checked against the source PDF.
+
+## Validation behavior
+
+The final validator:
+
+- removes known model control artifacts and normalizes empty contact labels;
+- normalizes supported date formats to ISO `YYYY-MM-DD`;
+- checks required policy and insured identifiers;
+- verifies premium tax and total arithmetic;
+- reconciles per-insured premiums with policy totals;
+- verifies that source-page references exist in the PDF;
+- detects duplicate coverages;
+- reconciles condition and mixed-currency warnings;
+- applies GNP Premier foreign-care corrections;
+- validates the full result against `insurance_schema_v3.json`;
+- sets `validation.summary.sql_ready` to `true` only when no high-severity warnings remain.
+
+A schema-valid document can still be non-SQL-ready when a business or provenance check emits a high-severity warning.
+
+## Configuration
+
+Defaults live in `pipeline/config.py`:
+
+| Setting | Default |
+| --- | --- |
+| Ollama model | `qwen3:8b` |
+| Schema | `insurance_schema_v3.json` |
+| Final output directory | `outputs/` |
+| Run artifact directory | `tmp/runs/` |
+| Temperature | `0` |
+| Maximum predicted tokens | `4096` |
+| Context window | `32768` |
+| Ollama retries | `2` |
+
+Only the model and schema are exposed as command-line options. Change other defaults by constructing a `PipelineConfig` in Python or editing the configuration module.
+
+The pipeline can also be called programmatically:
+
+```python
+from pathlib import Path
+
+from pipeline.config import PipelineConfig
+from process_policy import run_pipeline
+
+config = PipelineConfig(model_name="qwen3:8b")
+data, output_path, report = run_pipeline(Path("path/to/policy.pdf"), config)
+```
+
+## Repository layout
+
+```text
+.
+├── process_policy.py                 # Supported end-to-end CLI and orchestrator
+├── insurance_schema_v3.json          # Final JSON Schema contract
+├── pipeline/
+│   ├── config.py                     # Runtime defaults and output paths
+│   ├── bootstrap.py                  # Local .venv discovery
+│   ├── extract.py                    # Docling conversion and Ollama extraction
+│   ├── parsers/gnp.py                # Consolidated deterministic GNP parser
+│   ├── validate.py                   # Current final validator
+│   └── *_v*.py / final_validate.py   # Earlier standalone pipeline stages
+├── tests/                            # Unit and fixture regression tests
+├── fixtures/                         # Sample policy PDFs
+├── outputs/                          # Example/final validated JSON files
+├── tmp/                              # Intermediate and rerun artifacts
+├── Archive/                          # Superseded scripts and historical outputs
+└── graphify-out/                     # Generated code-graph analysis artifacts
+```
+
+For new integrations, use `process_policy.py` and the modules it imports. The versioned standalone scripts and `final_validate.py` remain useful as implementation history, but they are not invoked by the current end-to-end entry point.
+
+## Tests
+
+The suite uses Python's standard `unittest` runner:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Tests cover dynamic insured discovery, condition extraction and routing, coverage isolation, premium reconciliation, foreign-care matrices, string sanitization, schema validity, and SQL readiness.
+
+### Current fixture caveat
+
+`tests/test_gnp_dynamic_pipeline.py` hard-codes timestamped Docling and extraction artifacts under `tmp/runs/`. In the current checkout, the referenced `poliza_2_asegurados_20260904_100013` directory is absent. As a result, the suite currently reports 17 passing tests and 6 `FileNotFoundError` errors. Restore that run directory or update `FIXTURE_RUNS` to an available matching artifact before treating those fixture regressions as runnable.
+
+The unit tests mock Ollama calls where appropriate; running the full CLI requires a live Ollama service and the selected model.
+
+## Troubleshooting
+
+- **Ollama connection or model errors:** start Ollama and confirm the selected model is available with `ollama list`.
+- **Structured extraction failure:** inspect any `debug_<tag>_attempt_<n>.txt` files in the run directory. Calls are retried according to `PipelineConfig.ollama_retries`.
+- **No page-aware evidence:** regenerate `01_docling.json`; the extractor requires Docling text or table elements with page provenance.
+- **Validation exit code 1:** inspect `validation.warnings` in the output, especially entries whose `severity` is `high`.
+- **Unexpected overwrite:** copy or rename an existing file in `outputs/` before rerunning the same PDF name.
+
+## Scope and data handling
+
+The parser contains GNP-specific Spanish headings, plan rules, and PDF layout heuristics. Supporting another insurer or materially different policy layout will require a separate parser or extensions to `pipeline/parsers/gnp.py`.
+
+Policy PDFs and generated JSON can contain sensitive personal and financial information. Keep fixtures, run artifacts, debug output, and validated results out of public version control and handle them according to your organization's data-retention rules. The current `.gitignore` excludes these artifact directories.
