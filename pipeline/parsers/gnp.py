@@ -16,6 +16,7 @@ CERTIFICATE_COVERAGES = [
     ("Membresía de Médica Móvil", "Básicas"),
     ("Enfermedades Catastróficas Nacional", "Básicas"),
     ("Emergencia Médica en el Extranjero", "Opcionales"),
+    ("Cláusula Familiar", "Opcionales"),
     ("Cero Deducible por Accidente", "Opcionales"),
     ("Ampliación Hospitalaria Definida a PREMIUM", "Opcionales"),
 ]
@@ -780,6 +781,171 @@ def rebuild_repeated_certificate_conditions(data, pdf, insured_blocks):
     return len(rebuilt)
 
 
+def _condition_page_texts(pdf, insured_blocks):
+    pages = {}
+    page_to_insured = {}
+    for insured, page_numbers in insured_blocks:
+        header_page = insured.get("source_page")
+        for page_no in page_numbers:
+            if isinstance(header_page, int) and page_no <= header_page:
+                continue
+            pages[page_no] = norm(pdf[page_no - 1].get_text("text"))
+            page_to_insured[page_no] = insured.get("insured_number")
+    return pages, page_to_insured
+
+
+def _replace_condition_type(data, condition):
+    target = keytext(condition["condition_type"])
+    data["policy_conditions"] = [
+        item for item in data.get("policy_conditions", [])
+        if keytext(item.get("condition_type")) != target
+    ]
+    data["policy_conditions"].append(condition)
+
+
+def rebuild_additional_certificate_conditions(data, pdf, insured_blocks):
+    """Deterministically capture condition families previously swallowed as prose."""
+    page_texts, page_to_insured = _condition_page_texts(pdf, insured_blocks)
+    rebuilt = 0
+
+    def base(condition_type, pages, rules, description=None):
+        insured_numbers = sorted({page_to_insured[p] for p in pages if isinstance(page_to_insured.get(p), int)})
+        return {
+            "condition_type": condition_type,
+            "scope": "Asegurados indicados",
+            "description": description,
+            "rules": rules,
+            "source_page": min(pages),
+            "source_pages": sorted(pages),
+            "applicability_scope": "Insured",
+            "applies_to_insured_numbers": insured_numbers,
+        }
+
+    hospital_pages = [p for p, text in page_texts.items() if "penalizacion por acceso a hospitales de nivel superior" in keytext(text)]
+    if hospital_pages:
+        text = page_texts[hospital_pages[0]]
+        points = re.search(r"(\d+(?:\.\d+)?)\s+puntos porcentuales por cada nivel hospitalario", text, re.I)
+        cap = re.search(r"nivel inmediato superior.*?\$\s*([\d,]+(?:\.\d+)?)", text, re.I)
+        rules = []
+        if points:
+            rules.append(make_rule("Penalización por cada nivel hospitalario que ascienda", points.group(0), percentage=float(points.group(1)), unit="puntos porcentuales"))
+        if cap:
+            rules.append(make_rule("Tope por atención en nivel inmediato superior", f"${cap.group(1)}", amount=parse_money(cap.group(1)), currency="MXN"))
+        if rules:
+            _replace_condition_type(data, base("Penalización por acceso a hospitales de nivel superior al contratado", hospital_pages, rules))
+            rebuilt += 1
+
+    device_phrase = "compra o renta de aparatos ortopedicos protesis y dispositivos medicos"
+    device_pages = [p for p, text in page_texts.items() if device_phrase in keytext(text)]
+    if device_pages:
+        text = page_texts[device_pages[0]]
+        prosthesis = re.search(r"Monto para pr[oó]tesis\s+\$\s*([\d,]+(?:\.\d+)?)\s*pesos", text, re.I)
+        device = re.search(r"Monto para dispositivo m[eé]dico o aparato ortop[eé]dico\s+\$\s*([\d,]+(?:\.\d+)?)\s*pesos", text, re.I)
+        rules = []
+        if prosthesis:
+            rules.append(make_rule("Monto para prótesis", f"${prosthesis.group(1)} pesos", amount=parse_money(prosthesis.group(1)), currency="MXN", unit="por aparato o prótesis"))
+        if device:
+            rules.append(make_rule("Monto para dispositivo médico o aparato ortopédico", f"${device.group(1)} pesos", amount=parse_money(device.group(1)), currency="MXN", unit="por aparato o dispositivo"))
+        if rules:
+            description = "Aplica por cada aparato ortopédico, prótesis o dispositivo médico que el asegurado requiera."
+            _replace_condition_type(data, base("Compra o renta de aparatos ortopédicos, prótesis y dispositivos médicos", device_pages, rules, description))
+            rebuilt += 1
+
+    maternity_pages = [p for p, text in page_texts.items() if "ayuda para maternidad" in keytext(text)]
+    if maternity_pages:
+        text = page_texts[maternity_pages[0]]
+        amount = re.search(r"Ayuda para maternidad.*?Suma Asegurada de Parto Normal o Ces[aá]rea:\s*([\d,]+(?:\.\d+)?)\s*pesos", text, re.I)
+        if amount:
+            rules = [make_rule("Suma asegurada de parto normal o cesárea", f"{amount.group(1)} pesos", amount=parse_money(amount.group(1)), currency="MXN")]
+            _replace_condition_type(data, base("Ayuda para maternidad", maternity_pages, rules))
+            rebuilt += 1
+    return rebuilt
+
+
+CONDITION_LAYOUT_LABELS = {
+    "poliza de seguro gastos medicos", "linea azul poliza no", "version",
+    "certificado de cobertura por asegurado", "condiciones especiales",
+    "periodo de cobertura", "suma asegurada", "primeros", "100 000 pesos",
+    "resto del", "gasto", "coaseguro contratado", "tope de coaseguro",
+    "nacional", "monto", "monto maximo a pagar",
+}
+
+
+def detect_bold_condition_headings(page):
+    """Return meaningful bold headings/subheadings in the certificate body."""
+    headings = []
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type", 0) != 0:
+            continue
+        for line in block.get("lines", []):
+            if line.get("bbox", [0, 0, 0, 0])[1] < 82 or line.get("bbox", [0, 0, 0, 0])[1] > 690:
+                continue
+            spans = [span for span in line.get("spans", []) if norm(span.get("text"))]
+            if not spans or not all((span.get("flags", 0) & 16) or "black" in str(span.get("font", "")).lower() or "bold" in str(span.get("font", "")).lower() for span in spans):
+                continue
+            text = norm(" ".join(span.get("text", "") for span in spans))
+            text = re.sub(r"^[\-–−•]+\s*", "", text)
+            keyed = keytext(text)
+            if not keyed or keyed in CONDITION_LAYOUT_LABELS:
+                continue
+            if text[:1].islower():
+                continue
+            if keyed.startswith(("pagina ", "en caso de requerir mayor informacion", "gnp al 55")):
+                continue
+            if re.fullmatch(r"[\d\s$%,.]+", text) or re.match(r"^\$?\s*[\d,]+(?:\.\d+)?\s+(?:pesos|dls)\b", text, re.I):
+                continue
+            headings.append(text)
+    return list(dict.fromkeys(headings))
+
+
+def build_condition_heading_audit(data, pdf, insured_blocks):
+    """Classify every detected heading as structured, document text, or unmapped."""
+    page_texts, page_to_insured = _condition_page_texts(pdf, insured_blocks)
+    records = []
+    for page_no in sorted(page_texts):
+        detected = detect_bold_condition_headings(pdf[page_no - 1])
+        if not detected:
+            continue
+        insured_number = page_to_insured.get(page_no)
+        applicable = []
+        for condition in data.get("policy_conditions", []):
+            applies = condition.get("applies_to_insured_numbers") or []
+            if insured_number in applies or not applies:
+                applicable.append(condition)
+        insured = next((item for item in data.get("insureds", []) if item.get("insured_number") == insured_number), None)
+        if insured:
+            applicable.extend(insured.get("conditions") or [])
+        structured_keys = []
+        for condition in applicable:
+            structured_keys.append(keytext(condition.get("condition_type")))
+            structured_keys.extend(keytext(rule.get("criteria")) for rule in condition.get("rules", []))
+
+        mapped, document_text, unmapped = [], [], []
+        for heading in detected:
+            heading_key = keytext(heading)
+            heading_variants = {heading_key, keytext(canonical_type(heading))}
+            if any(
+                variant == key or (len(variant) >= 12 and len(key) >= 12 and (variant in key or key in variant))
+                for variant in heading_variants for key in structured_keys if key
+            ):
+                mapped.append(heading)
+            elif len(heading) > 80 or heading.endswith("."):
+                document_text.append(heading)
+                add_section(data, "condition_document_text", heading, heading, page_no)
+            else:
+                unmapped.append(heading)
+        records.append({
+            "page": page_no,
+            "insured_number": insured_number,
+            "detected_headings": detected,
+            "mapped_headings": mapped,
+            "document_text_headings": document_text,
+            "unmapped_headings": unmapped,
+        })
+    data["condition_heading_audit"] = records
+    return records
+
+
 def add_section(data, section_type, heading, text, page):
     text = norm(text)
     if not text:
@@ -1183,9 +1349,11 @@ def process_gnp_policy(data: dict, pdf_path: Path, run_dir: Path) -> tuple[dict,
 
     raw_count, final_count, moved, normalized_amounts, normalized_waiting = clean_policy_conditions(data)
     rebuilt_common_conditions = rebuild_repeated_certificate_conditions(data, pdf, insured_blocks)
+    rebuilt_additional_conditions = rebuild_additional_certificate_conditions(data, pdf, insured_blocks)
     foreign_care_rebuilt = rebuild_foreign_care_condition(data, run_dir)
     foreign_care_collapsed = collapse_rebuilt_foreign_care_conditions(data) if foreign_care_rebuilt else 0
     sections_added, reg_found = extract_document_sections_and_regulatory(data, pdf)
+    condition_heading_audit = build_condition_heading_audit(data, pdf, insured_blocks)
     dedupe_sections(data)
     add_condition_audit(data, raw_count, len(data.get("policy_conditions", [])), moved, sections_added, reg_found)
     cleaned_path = run_dir / "04_gnp_cleaned.json"
@@ -1209,6 +1377,9 @@ def process_gnp_policy(data: dict, pdf_path: Path, run_dir: Path) -> tuple[dict,
     reports["normalized_amount_conditions"] = normalized_amounts
     reports["normalized_waiting_conditions"] = normalized_waiting
     reports["rebuilt_common_conditions"] = rebuilt_common_conditions
+    reports["rebuilt_additional_conditions"] = rebuilt_additional_conditions
+    reports["condition_heading_pages"] = len(condition_heading_audit)
+    reports["unmapped_condition_headings"] = sum(len(item["unmapped_headings"]) for item in condition_heading_audit)
     reports["foreign_care_rebuilt"] = foreign_care_rebuilt
     reports["foreign_care_collapsed"] = foreign_care_collapsed
     reports["final_insured_condition_counts"] = {
