@@ -141,6 +141,21 @@ def condition_payload(heading: str, page_no: int) -> dict:
 
 
 class ConditionSectionTests(unittest.TestCase):
+    def test_condition_signature_handles_mixed_null_and_numeric_rule_values(self):
+        from pipeline.parsers.gnp import condition_sig
+
+        condition = {
+            "condition_type": "Tope de coaseguro",
+            "scope": "Nacional",
+            "description": None,
+            "rules": [
+                {"criteria": "A", "amount": None, "secondary_amount": None, "currency": None, "percentage": 10, "secondary_percentage": None, "raw_value": "10%"},
+                {"criteria": "B", "amount": 100, "secondary_amount": None, "currency": "MXN", "percentage": None, "secondary_percentage": None, "raw_value": "$100"},
+            ],
+        }
+
+        self.assertEqual(condition_sig(condition)[0], "Tope de coaseguro")
+
     def test_extract_policy_splits_repeated_condition_pages(self):
         doc = build_doc()
         seen_tags = []

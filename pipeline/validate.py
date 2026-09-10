@@ -284,8 +284,13 @@ def validate_premiums(data):
     rate = float(premium.get("tax_rate_percent") or 0)
     expected_tax = round(subtotal * rate / 100, 2)
     expected_total = round(subtotal + float(premium["tax_amount"]), 2)
-    if abs(expected_tax - float(premium["tax_amount"])) > 0.02:
-        add_warning(data, "premium_summary.tax_amount", f"Tax mismatch: expected {expected_tax:.2f}, document has {float(premium['tax_amount']):.2f}.", "high", premium.get("source_page"))
+    # Printed policy tax can reflect per-insured rounding or unprinted fractional
+    # premiums. Preserve the explicit document amount and flag only materially
+    # larger differences as high severity.
+    tax_delta = abs(expected_tax - float(premium["tax_amount"]))
+    if tax_delta > 0.02:
+        severity = "high" if tax_delta > 0.25 else "medium"
+        add_warning(data, "premium_summary.tax_amount", f"Tax mismatch: expected {expected_tax:.2f}, document has {float(premium['tax_amount']):.2f}.", severity, premium.get("source_page"))
     if abs(expected_total - float(premium["total_amount"])) > 0.02:
         add_warning(data, "premium_summary.total_amount", f"Total mismatch: expected {expected_total:.2f}, document has {float(premium['total_amount']):.2f}.", "high", premium.get("source_page"))
 
