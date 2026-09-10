@@ -6,9 +6,13 @@ from collections import defaultdict
 from pathlib import Path
 
 from docling.document_converter import DocumentConverter
+from jsonschema import Draft202012Validator
 from ollama import chat
 
 from pipeline.config import PipelineConfig
+
+
+NOTES_MAX_LENGTH = 300
 
 
 SYSTEM_PROMPT = """You are a strict Spanish insurance-policy extraction engine.
@@ -16,7 +20,10 @@ Extract only facts explicitly supported by the supplied Docling evidence. Never 
 Preserve names, RFC/tax IDs, policy numbers, customer codes, Spanish plan names and coverage names exactly.
 Normalize pesos -> MXN and dls/dólares norteamericanos -> USD only in normalized currency fields.
 Never borrow sum insured, deductible, coinsurance, or service cost from an adjacent row. Values must belong to the same logical coverage row.
-If row association is uncertain, return null and add a warning. Preserve every row of rule tables. Return JSON matching the supplied schema."""
+If row association is uncertain, return null and add a warning. Preserve every row of rule tables.
+The notes field is only for meaningful facts not represented by another structured field. Never put a structured value in notes a second time.
+Never copy tables, Markdown table syntax, cell separators, empty cells, page formatting, or repeated whitespace into notes.
+Use null when there is no additional fact for notes, and never exceed 300 characters. Return JSON matching the supplied schema."""
 
 CONDITION_HEADINGS = {
     "cobertura de preexistencia": "Cobertura de preexistencia",
@@ -82,7 +89,7 @@ def condition_schema():
             "currency": {"type": ["string", "null"]}, "percentage": {"type": ["number", "null"]},
             "secondary_percentage": {"type": ["number", "null"]}, "unit": {"type": ["string", "null"]},
             "effective_start_date": {"type": ["string", "null"]}, "effective_end_date": {"type": ["string", "null"]},
-            "notes": {"type": ["string", "null"]}},
+            "notes": {"type": ["string", "null"], "maxLength": NOTES_MAX_LENGTH}},
             "required": ["criteria", "raw_value", "amount", "secondary_amount", "currency", "percentage", "secondary_percentage", "unit", "effective_start_date", "effective_end_date", "notes"]}},
         "source_page": {"type": ["integer", "null"]}},
         "required": ["condition_type", "scope", "description", "rules", "source_page"]}
@@ -100,7 +107,7 @@ def coverage_schema():
             "raw_value": {"type": ["string", "null"]}, "amount": {"type": ["number", "null"]},
             "currency": {"type": ["string", "null"]}, "unit": {"type": ["string", "null"]}},
             "required": ["raw_value", "amount", "currency", "unit"]},
-        "notes": {"type": ["string", "null"]}, "source_page": {"type": ["integer", "null"]}},
+        "notes": {"type": ["string", "null"], "maxLength": NOTES_MAX_LENGTH}, "source_page": {"type": ["integer", "null"]}},
         "required": ["category", "name", "scope", "status", "sum_insured", "deductible", "coinsurance", "service_cost", "notes", "source_page"]}
 
 
@@ -165,13 +172,79 @@ def schema_condition_section():
         "required": ["condition", "warnings"]}
 
 
+def _scalar_strings(value) -> list[str]:
+    if isinstance(value, dict):
+        return [item for key, child in value.items() if key != "notes" for item in _scalar_strings(child)]
+    if isinstance(value, list):
+        return [item for child in value for item in _scalar_strings(child)]
+    if isinstance(value, str):
+        return [norm(value)] if norm(value) else []
+    return []
+
+
+def validate_notes(value, path: str = "$") -> list[str]:
+    """Return errors for unsafe or duplicative notes anywhere in a model object."""
+    errors = []
+    if isinstance(value, dict):
+        note = value.get("notes")
+        if isinstance(note, str):
+            note_path = f"{path}.notes"
+            if not note.strip():
+                errors.append(f"{note_path} must be null when there is no additional information")
+            if len(note) > NOTES_MAX_LENGTH:
+                errors.append(f"{note_path} exceeds {NOTES_MAX_LENGTH} characters")
+            if "|" in note or re.search(r"(?:^|\n)\s*:?-{3,}:?\s*(?:\||$)", note):
+                errors.append(f"{note_path} contains table or separator artifacts")
+            if re.search(r"[\r\n\t]|\s{2,}", note):
+                errors.append(f"{note_path} contains page formatting or repeated whitespace")
+
+            note_key = keytext(note)
+            for structured_value in _scalar_strings(value):
+                structured_key = keytext(structured_value)
+                if len(structured_key) >= 8 and structured_key in note_key:
+                    errors.append(
+                        f"{note_path} duplicates structured value {structured_value!r}"
+                    )
+                    break
+        for key, child in value.items():
+            if key != "notes":
+                errors.extend(validate_notes(child, f"{path}.{key}"))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            errors.extend(validate_notes(child, f"{path}[{index}]"))
+    return errors
+
+
+def validate_structured_response(value: object, schema: dict) -> None:
+    errors = [
+        f"{'.'.join(str(part) for part in error.absolute_path) or '$'}: {error.message}"
+        for error in Draft202012Validator(schema).iter_errors(value)
+    ]
+    errors.extend(validate_notes(value))
+    if errors:
+        raise ValueError("; ".join(errors[:10]))
+
+
 def call_structured(model: str, schema: dict, prompt: str, config: PipelineConfig, debug_dir: Path, tag: str = "call") -> dict:
     last = None
+    retry_issue = None
     for attempt in range(1, config.ollama_retries + 2):
+        content = ""
         try:
+            attempt_prompt = prompt
+            if retry_issue:
+                attempt_prompt += (
+                    "\n\nYour previous response for this same object failed validation. "
+                    f"Correct only this object and return it again. Validation error: {retry_issue}"
+                )
+                if ".notes" in retry_issue:
+                    attempt_prompt += (
+                        "\nFor every notes field named in that error, set notes to null. "
+                        "Do not move the duplicated text into another notes field or explain the correction in warnings."
+                    )
             response = chat(
                 model=model,
-                messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": prompt}],
+                messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": attempt_prompt}],
                 format=schema,
                 think=False,
                 options={
@@ -181,11 +254,14 @@ def call_structured(model: str, schema: dict, prompt: str, config: PipelineConfi
                 },
             )
             content = response.message.content
-            return json.loads(content)
+            parsed = json.loads(content)
+            validate_structured_response(parsed, schema)
+            return parsed
         except Exception as exc:
             last = exc
-            raw = locals().get("content", "")
-            (debug_dir / f"debug_{tag}_attempt_{attempt}.txt").write_text(raw, encoding="utf-8")
+            retry_issue = str(exc)
+            # Preserve the exact raw model content for every rejected attempt.
+            (debug_dir / f"debug_{tag}_attempt_{attempt}.txt").write_text(content, encoding="utf-8")
             if attempt <= config.ollama_retries:
                 continue
     raise RuntimeError(f"{tag} failed after retries: {last}")
@@ -206,7 +282,7 @@ def page_sort_y(prov: dict) -> float:
 def build_page_items(doc: dict) -> dict[int, list[dict]]:
     pages: dict[int, list[dict]] = defaultdict(list)
     for item in doc.get("texts", []):
-        text = (item.get("text") or item.get("orig") or "").strip()
+        text = clean_evidence_text(item.get("text") or item.get("orig") or "")
         prov = item.get("prov") or []
         page_no = prov[0].get("page_no") if prov else None
         if text and page_no:
@@ -226,9 +302,14 @@ def build_page_items(doc: dict) -> dict[int, list[dict]]:
         rows = []
         for row in grid:
             vals = []
-            for cell in row:
-                vals.append(((cell.get("text") or "") if isinstance(cell, dict) else str(cell)).strip())
-            rows.append(" | ".join(vals))
+            for column, cell in enumerate(row, start=1):
+                raw = (cell.get("text") or "") if isinstance(cell, dict) else str(cell)
+                cleaned = clean_evidence_text(raw)
+                if cleaned:
+                    # Keep original column coordinates while omitting empty cells.
+                    vals.append(f"C{column}: {cleaned}")
+            if vals:
+                rows.append(" ; ".join(vals))
         if rows:
             pages[int(page_no)].append({
                 "kind": "table",
@@ -241,6 +322,27 @@ def build_page_items(doc: dict) -> dict[int, list[dict]]:
     for page_no, items in pages.items():
         ordered[page_no] = sorted(items, key=lambda item: (-item["sort_y"], item["sort_idx"]))
     return dict(sorted(ordered.items()))
+
+
+def clean_evidence_text(text: str | None) -> str:
+    """Remove Docling blank/table residue without discarding meaningful text."""
+    cleaned_lines = []
+    for raw_line in str(text or "").splitlines():
+        line = re.sub(r"[ \t\f\v]+", " ", raw_line).strip()
+        if not line:
+            continue
+        if re.fullmatch(r"(?:\|\s*)+", line):
+            continue
+        if re.fullmatch(r"\|?\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)*\s*\|?", line):
+            continue
+        if "|" in line:
+            cells = [norm(cell) for cell in line.split("|") if norm(cell)]
+            if not cells:
+                continue
+            line = " ; ".join(cells)
+        if not cleaned_lines or line != cleaned_lines[-1]:
+            cleaned_lines.append(line)
+    return " ".join(cleaned_lines)
 
 
 def format_page_item(item: dict) -> str:

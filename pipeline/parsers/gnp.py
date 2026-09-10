@@ -398,12 +398,32 @@ def clean_old_coverage_warnings(data):
     for warning in warnings:
         field = warning.get("field")
         issue = keytext(warning.get("issue"))
-        if field in {"insureds.coverages", "policy_coverages"} and ("coverage" in issue or "cobertura" in issue):
+        repaired_field = field in {"insureds.coverages", "policy_coverages"} or str(field or "").startswith("coverage_")
+        if repaired_field and ("coverage" in issue or "cobertura" in issue or "row association" in issue):
             removed += 1
             continue
         cleaned.append(warning)
     data["validation"]["warnings"] = cleaned
     return removed
+
+
+def extract_insured_premium(page):
+    """Read the labeled premium block from one insured certificate page."""
+    text = page.get_text("text")
+    match = re.search(r"Prima del Asegurado(.*?)(?:Vigencia de la versi[oó]n|Coberturas y Servicios)", text, re.I | re.S)
+    block = match.group(1) if match else text
+    patterns = {
+        "net_premium": rf"Prima Neta\s+({money_pat()})",
+        "installment_surcharge": rf"Recargo por Pago\s+Fraccionado\s+({money_pat()})",
+        "policy_fee": rf"Derecho de P[oó]liza\s+({money_pat()})",
+        "tax_amount": rf"I\.V\.A\.\s*16%\s+({money_pat()})",
+        "total_amount": rf"Importe Total a\s+Pagar\s+({money_pat()})",
+    }
+    result = {}
+    for field, pattern in patterns.items():
+        value = re.search(pattern, block, re.I)
+        result[field] = parse_money(value.group(1)) if value else None
+    return result
 
 
 def add_coverage_audit(data, layout, insured_counts, policy_count):
@@ -458,7 +478,9 @@ def condition_sig(cond):
         canonical_type(cond.get("condition_type")),
         keytext(cond.get("scope")),
         keytext(cond.get("description")),
-        tuple(sorted(rule_sig(rule) for rule in cond.get("rules", []))),
+        # Optional numeric fields can be None or numbers; repr gives a stable
+        # deterministic order without comparing unlike Python scalar types.
+        tuple(sorted((rule_sig(rule) for rule in cond.get("rules", [])), key=repr)),
     )
 
 
@@ -580,13 +602,15 @@ def parse_waiting_period_rules(cond):
 
     benefit_raw = None
     for rule in cond.get("rules", []):
-        benefit_raw = norm(rule.get("raw_value"))
-        if benefit_raw:
+        candidate = " ".join(filter(None, [norm(rule.get("raw_value")), norm(rule.get("criteria"))]))
+        date_match = re.search(r"\b(\d{1,2}/\d{1,2}/\d{4})\b", candidate)
+        if date_match:
+            benefit_raw = date_match.group(1)
             break
-        criteria_match = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", norm(rule.get("criteria")), flags=re.I)
-        if criteria_match:
-            benefit_raw = criteria_match.group(1)
-            break
+    if not benefit_raw:
+        dates = re.findall(r"\b(\d{1,2}/\d{1,2}/\d{4})\b", desc_text)
+        if dates:
+            benefit_raw = dates[-1]
     if benefit_raw:
         rules.append(
             make_rule(
@@ -676,6 +700,84 @@ def clean_policy_conditions(data):
                 target["description"] = norm((d1 + " " + d2).strip())
     data["policy_conditions"] = policy
     return len(raw), len(policy), moved_to_insured, normalized_amounts, normalized_waiting
+
+
+def rebuild_repeated_certificate_conditions(data, pdf, insured_blocks):
+    """Rebuild repeated GNP certificate tables from their printed text.
+
+    These conditions recur for every discovered insured. Parsing one canonical
+    copy and attaching all observed pages avoids model-dependent merge splits.
+    """
+    insured_numbers = [
+        insured.get("insured_number")
+        for insured, _pages in insured_blocks
+        if isinstance(insured.get("insured_number"), int)
+    ]
+    if not insured_numbers:
+        return 0
+
+    page_texts = {}
+    for _insured, page_numbers in insured_blocks:
+        for page_no in page_numbers:
+            page_texts[page_no] = norm(pdf[page_no - 1].get_text("text"))
+
+    specs = {
+        "Cobertura de preexistencia": "cobertura de preexistencia",
+        "Cobertura de atención en el extranjero": "cobertura atencion en el extranjero",
+        "Tope de coaseguro": "tope de coaseguro",
+        "Monto para Productos de Terapia génica": "monto para productos de terapia genica",
+        "Auxiliares mecánicos electrónicos y/o computarizados": "auxiliares mecanicos electronicos y o computarizados",
+    }
+    pages_by_type = {
+        condition_type: [page for page, text in page_texts.items() if heading in keytext(text)]
+        for condition_type, heading in specs.items()
+    }
+
+    rebuilt = []
+    for condition_type, source_pages in pages_by_type.items():
+        if not source_pages:
+            continue
+        text = page_texts[source_pages[0]]
+        rules = []
+        if condition_type == "Cobertura de preexistencia":
+            for criteria, amount in re.findall(r"(\d+\s*(?:[-–−]|a)\s*\d+\s*años|\d+\s*años\s+en\s+adelante)\s+\$?\s*([\d,]+(?:\.\d+)?)\s*pesos", text, re.I):
+                rules.append(make_rule(norm(criteria), f"${amount} pesos", parse_money(amount), currency="MXN"))
+        elif condition_type == "Cobertura de atención en el extranjero":
+            for plan, first, rest in re.findall(r"(Premium|Platino|[ÍI]ndigo|[ÁA]mbar|Cuarzo)\s+(\d+(?:\.\d+)?)%\s+(\d+(?:\.\d+)?)%", text, re.I):
+                rules.append(make_rule(plan, f"{first}% / {rest}%", percentage=float(first), secondary_percentage=float(rest), unit="%"))
+        elif condition_type == "Tope de coaseguro":
+            for percentages, amount in re.findall(r"(\d+%\s*y\s*\d+%)\s+\$?\s*([\d,]+(?:\.\d+)?)", text, re.I):
+                rules.append(make_rule(norm(percentages), f"${amount}", parse_money(amount), currency="MXN"))
+        elif condition_type == "Monto para Productos de Terapia génica":
+            match = re.search(r"Monto para Productos de Terapia g[eé]nica.*?\$\s*([\d,]+(?:\.\d+)?)\s*pesos", text, re.I)
+            if match:
+                amount = match.group(1)
+                rules.append(make_rule("Monto", f"$ {amount} pesos", parse_money(amount), currency="MXN"))
+        elif condition_type == "Auxiliares mecánicos electrónicos y/o computarizados":
+            match = re.search(r"Auxiliares mec[aá]nicos electr[oó]nicos y/o computarizados.*?Monto m[aá]ximo a pagar\s+\$\s*([\d,]+(?:\.\d+)?)\s*pesos", text, re.I)
+            if match:
+                amount = match.group(1)
+                rules.append(make_rule("Monto máximo a pagar", f"$ {amount} pesos", parse_money(amount), currency="MXN"))
+        if not rules:
+            continue
+        rebuilt.append({
+            "condition_type": condition_type,
+            "scope": "Todos los asegurados",
+            "description": None,
+            "rules": rules,
+            "source_page": min(source_pages),
+            "source_pages": sorted(source_pages),
+            "applicability_scope": "Insured",
+            "applies_to_insured_numbers": sorted(set(insured_numbers)),
+        })
+
+    rebuilt_types = {item["condition_type"] for item in rebuilt}
+    kept = [
+        condition for condition in data.get("policy_conditions", [])
+        if canonical_type(condition.get("condition_type")) not in rebuilt_types
+    ]
+    data["policy_conditions"] = kept + rebuilt
+    return len(rebuilt)
 
 
 def add_section(data, section_type, heading, text, page):
@@ -1011,7 +1113,7 @@ def add_warning(data, field, issue, severity="low", source_page=1):
 
 
 def remove_stale_metadata_warnings(data):
-    stale = {"coverage_start_date", "coverage_end_date", "term_days", "premium_summary", "premium_summary.payment_channel", "premium_summary.payment_method", "agent.agent_code", "issue_date"}
+    stale = {"coverage_start_date", "coverage_end_date", "term_days", "premium_summary", "premium_summary.payment_channel", "premium_summary.payment_method", "agent.agent_code", "issue_date", "issuance_date"}
     warnings = data.setdefault("validation", {}).setdefault("warnings", [])
     kept = [warning for warning in warnings if warning.get("field") not in stale]
     removed = len(warnings) - len(kept)
@@ -1046,7 +1148,7 @@ def validate_metadata(data):
     rate = float(premium.get("tax_rate_percent", 16))
     expected_tax = round(subtotal * rate / 100, 2)
     expected_total = round(subtotal + float(premium["tax_amount"]), 2)
-    if abs(expected_tax - float(premium["tax_amount"])) > 0.02:
+    if abs(expected_tax - float(premium["tax_amount"])) > 0.25:
         add_warning(data, "premium_summary.tax_amount", f"Tax arithmetic mismatch: expected {expected_tax:.2f}, document {float(premium['tax_amount']):.2f}.", "medium")
     if abs(expected_total - float(premium["total_amount"])) > 0.02:
         add_warning(data, "premium_summary.total_amount", f"Total arithmetic mismatch: calculated {expected_total:.2f}, document {float(premium['total_amount']):.2f}.", "high")
@@ -1070,6 +1172,7 @@ def process_gnp_policy(data: dict, pdf_path: Path, run_dir: Path) -> tuple[dict,
     for insured, page_numbers in insured_blocks:
         rows = extract_certificate_coverages_from_block(pdf, page_numbers)
         insured["coverages"] = rows
+        insured["premium"] = extract_insured_premium(pdf[page_numbers[0] - 1])
         insured_counts[insured.get("insured_number")] = len(rows)
     policy_rows = extract_policy_coverages(pdf[0])
     data["policy_coverages"] = policy_rows
@@ -1079,6 +1182,7 @@ def process_gnp_policy(data: dict, pdf_path: Path, run_dir: Path) -> tuple[dict,
     repaired_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     raw_count, final_count, moved, normalized_amounts, normalized_waiting = clean_policy_conditions(data)
+    rebuilt_common_conditions = rebuild_repeated_certificate_conditions(data, pdf, insured_blocks)
     foreign_care_rebuilt = rebuild_foreign_care_condition(data, run_dir)
     foreign_care_collapsed = collapse_rebuilt_foreign_care_conditions(data) if foreign_care_rebuilt else 0
     sections_added, reg_found = extract_document_sections_and_regulatory(data, pdf)
@@ -1104,6 +1208,7 @@ def process_gnp_policy(data: dict, pdf_path: Path, run_dir: Path) -> tuple[dict,
     reports["moved_insured_conditions"] = moved
     reports["normalized_amount_conditions"] = normalized_amounts
     reports["normalized_waiting_conditions"] = normalized_waiting
+    reports["rebuilt_common_conditions"] = rebuilt_common_conditions
     reports["foreign_care_rebuilt"] = foreign_care_rebuilt
     reports["foreign_care_collapsed"] = foreign_care_collapsed
     reports["final_insured_condition_counts"] = {

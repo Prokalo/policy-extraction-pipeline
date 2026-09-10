@@ -556,7 +556,8 @@
                   "type": [
                     "string",
                     "null"
-                  ]
+                  ],
+                  "maxLength": 300
                 },
                 "source_page": {
                   "type": [
@@ -843,7 +844,8 @@
                 "type": [
                   "string",
                   "null"
-                ]
+                ],
+                "maxLength": 300
               }
             },
             "required": [
