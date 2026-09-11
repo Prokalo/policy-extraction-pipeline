@@ -688,6 +688,21 @@
         ]
       }
     },
+    "condition_heading_audit": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "page": {"type": "integer"},
+          "insured_number": {"type": ["integer", "null"]},
+          "detected_headings": {"type": "array", "items": {"type": "string"}},
+          "mapped_headings": {"type": "array", "items": {"type": "string"}},
+          "document_text_headings": {"type": "array", "items": {"type": "string"}},
+          "unmapped_headings": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["page", "insured_number", "detected_headings", "mapped_headings", "document_text_headings", "unmapped_headings"]
+      }
+    },
     "validation": {
       "type": "object",
       "properties": {
@@ -751,6 +766,7 @@
     "policy_conditions",
     "regulatory",
     "document_sections",
+    "condition_heading_audit",
     "validation"
   ],
   "$defs": {

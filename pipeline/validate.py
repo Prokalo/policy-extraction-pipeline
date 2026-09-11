@@ -390,6 +390,21 @@ def validate_agent_name(data):
         add_warning(data, "agent.name", "Agent name may be visually truncated in the source text; agent_code should be treated as the authoritative identifier.", "low", (data.get("agent") or {}).get("source_page"))
 
 
+def validate_condition_heading_completeness(data):
+    unmapped_count = 0
+    for page in data.get("condition_heading_audit") or []:
+        for heading in page.get("unmapped_headings") or []:
+            unmapped_count += 1
+            add_warning(
+                data,
+                "condition_heading_audit",
+                f'Unmapped meaningful condition heading for insured {page.get("insured_number")}: "{heading}".',
+                "high",
+                page.get("page"),
+            )
+    return unmapped_count
+
+
 def validate_schema(data, schema_path: Path):
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     validator = jsonschema.Draft202012Validator(schema)
@@ -432,6 +447,7 @@ def validate_policy(data: dict, pdf_path: Path, schema_path: Path) -> tuple[dict
     validate_duplicate_coverages(data)
     validate_dates(data)
     validate_agent_name(data)
+    unmapped_condition_headings = validate_condition_heading_completeness(data)
     schema_errors = validate_schema(data, schema_path)
     add_warning(data, "validation", f"Final validator applied: {len(string_sanitizations)} string sanitization(s), {len(contact_normalizations)} contact normalization(s), {len(date_changes)} date normalization(s), {semantic_changes} semantic correction(s), {reconciled_warnings} reconciled condition warning(s), {reconciled_currency_warnings} reconciled currency warning(s), regulatory provenance corrected={reg_changed}, schema errors={len(schema_errors)}.", "low", None)
     dedupe_warnings(data)
@@ -445,6 +461,7 @@ def validate_policy(data: dict, pdf_path: Path, schema_path: Path) -> tuple[dict
         "reconciled_currency_warnings": reconciled_currency_warnings,
         "regulatory_provenance_corrected": reg_changed,
         "schema_error_count": len(schema_errors),
+        "unmapped_condition_heading_count": unmapped_condition_headings,
         "summary": summary,
     }
     return data, report

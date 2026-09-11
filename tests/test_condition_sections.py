@@ -6,8 +6,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from pipeline.config import PipelineConfig
-from pipeline.extract import extract_policy_from_docling
-from pipeline.parsers.gnp import clean_policy_conditions
+from pipeline.extract import canonical_condition_heading, extract_policy_from_docling
+from pipeline.parsers.gnp import (
+    clean_policy_conditions,
+    match_coverage_spans,
+    rebuild_additional_certificate_conditions,
+)
+from pipeline.validate import validate_condition_heading_completeness
 
 
 def text_item(page_no: int, text: str, y: float, label: str = "text") -> dict:
@@ -141,6 +146,69 @@ def condition_payload(heading: str, page_no: int) -> dict:
 
 
 class ConditionSectionTests(unittest.TestCase):
+    def test_coverage_spans_keep_clausula_familiar_beside_cero_deducible(self):
+        lines = [
+            {"name": "Opcionales", "sum": "", "ded": "", "coins": ""},
+            {"name": "Cláusula Familiar", "sum": "Amparada", "ded": "", "coins": ""},
+            {"name": "Cero Deducible por", "sum": "", "ded": "", "coins": ""},
+            {"name": "Accidente", "sum": "Amparada", "ded": "", "coins": ""},
+        ]
+
+        spans = match_coverage_spans(lines)
+
+        self.assertEqual([span["canonical"] for span in spans], ["Cláusula Familiar", "Cero Deducible por Accidente"])
+
+    def test_additional_conditions_use_detected_pages_for_applicability(self):
+        class Page:
+            def __init__(self, text):
+                self.text = text
+
+            def get_text(self, _kind):
+                return self.text
+
+        condition_text = """
+        Penalización por acceso a hospitales de nivel superior al contratado
+        15 puntos porcentuales por cada nivel hospitalario que ascienda.
+        En un nivel inmediato superior se aplicará un tope de $88,000.
+        Compra o renta de aparatos ortopédicos, prótesis y dispositivos médicos
+        Monto para prótesis $347,000 pesos
+        Monto para dispositivo médico o aparato ortopédico $866,000 pesos
+        """
+        pages = [Page("certificate"), Page(condition_text), Page("certificate"), Page(condition_text + " Ayuda para maternidad: Suma Asegurada de Parto Normal o Cesárea: 45,500.00 pesos")]
+        insureds = [{"insured_number": 1, "source_page": 1}, {"insured_number": 2, "source_page": 3}]
+        blocks = [(insureds[0], [1, 2]), (insureds[1], [3, 4])]
+        data = {"insureds": insureds, "policy_conditions": []}
+
+        self.assertEqual(rebuild_additional_certificate_conditions(data, pages, blocks), 3)
+        by_type = {condition["condition_type"]: condition for condition in data["policy_conditions"]}
+        self.assertEqual(by_type["Penalización por acceso a hospitales de nivel superior al contratado"]["applies_to_insured_numbers"], [1, 2])
+        self.assertEqual(by_type["Compra o renta de aparatos ortopédicos, prótesis y dispositivos médicos"]["applies_to_insured_numbers"], [1, 2])
+        self.assertEqual(by_type["Ayuda para maternidad"]["applies_to_insured_numbers"], [2])
+
+    def test_completeness_validation_rejects_unmapped_meaningful_heading(self):
+        data = {
+            "condition_heading_audit": [{
+                "page": 4,
+                "insured_number": 1,
+                "detected_headings": ["Nueva cobertura"],
+                "mapped_headings": [],
+                "document_text_headings": [],
+                "unmapped_headings": ["Nueva cobertura"],
+            }],
+            "validation": {"warnings": []},
+        }
+
+        self.assertEqual(validate_condition_heading_completeness(data), 1)
+        self.assertEqual(data["validation"]["warnings"][0]["severity"], "high")
+
+    def test_open_ended_heading_detection_accepts_unknown_condition_name(self):
+        item = {"label": "section_header", "text": "- Nueva cobertura experimental"}
+        self.assertEqual(canonical_condition_heading(item), "Nueva cobertura experimental")
+
+    def test_open_ended_heading_detection_rejects_rule_value_bullets(self):
+        item = {"label": "list_item", "text": "15 puntos porcentuales por cada nivel"}
+        self.assertIsNone(canonical_condition_heading(item))
+
     def test_condition_signature_handles_mixed_null_and_numeric_rule_values(self):
         from pipeline.parsers.gnp import condition_sig
 

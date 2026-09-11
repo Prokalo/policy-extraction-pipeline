@@ -25,13 +25,13 @@ The notes field is only for meaningful facts not represented by another structur
 Never copy tables, Markdown table syntax, cell separators, empty cells, page formatting, or repeated whitespace into notes.
 Use null when there is no additional fact for notes, and never exceed 300 characters. Return JSON matching the supplied schema."""
 
-CONDITION_HEADINGS = {
-    "cobertura de preexistencia": "Cobertura de preexistencia",
-    "cobertura de atencion en el extranjero": "Cobertura de atención en el extranjero",
-    "tope de coaseguro": "Tope de coaseguro",
-    "eliminacion o reduccion de periodos de espera": "Eliminación o reducción de periodos de espera",
-    "monto para productos de terapia genica": "Monto para Productos de Terapia génica",
-    "auxiliares mecanicos electronicos y o computarizados": "Auxiliares mecánicos electrónicos y/o computarizados",
+CONDITION_CHROME = {
+    "poliza de seguro gastos medicos",
+    "certificado de cobertura por asegurado",
+    "condiciones especiales",
+    "nacional",
+    "monto",
+    "monto maximo a pagar",
 }
 
 
@@ -366,9 +366,20 @@ def page_text_from_items(items: list[dict]) -> str:
     return "\n".join(item.get("text", "") for item in items)
 
 
-def canonical_condition_heading(text: str) -> str | None:
-    clean = re.sub(r"^[\-\*\u2022]+\s*", "", norm(text))
-    return CONDITION_HEADINGS.get(keytext(clean))
+def canonical_condition_heading(item: dict) -> str | None:
+    """Identify a condition heading structurally, without a name allow-list."""
+    label = item.get("label")
+    if label not in {"section_header", "list_item"}:
+        return None
+    clean = re.sub(r"^[\-\*•−–]+\s*", "", norm(item.get("text")))
+    keyed = keytext(clean)
+    if not keyed or keyed in CONDITION_CHROME:
+        return None
+    if re.search(r"\d|[$%]", clean):
+        return None
+    if label == "list_item" and (len(clean) > 140 or clean.endswith(".")):
+        return None
+    return clean
 
 
 def render_page_items(items: list[dict]) -> str:
@@ -377,9 +388,20 @@ def render_page_items(items: list[dict]) -> str:
 
 def split_condition_sections(page_items: dict[int, list[dict]], page_no: int) -> list[dict]:
     items = page_items.get(page_no, [])
+    marker_index = next(
+        (index for index, item in enumerate(items) if keytext(item.get("text")) == "condiciones especiales"),
+        None,
+    )
+    continuation = marker_index is None
+    if continuation and not any(canonical_condition_heading(item) for item in items if item.get("label") == "list_item"):
+        return []
     heading_positions = []
     for idx, item in enumerate(items):
-        heading = canonical_condition_heading(item.get("text"))
+        if marker_index is not None and idx <= marker_index:
+            continue
+        if continuation and item.get("label") != "list_item":
+            continue
+        heading = canonical_condition_heading(item)
         if heading:
             heading_positions.append((idx, heading))
 
@@ -534,27 +556,6 @@ def discover_insured_certificate_blocks(page_items: dict[int, list[dict]]) -> li
     return blocks
 
 
-def find_condition_pages(pages: dict[int, list[str]]) -> list[int]:
-    keys = (
-        "CONDICIONES ESPECIALES",
-        "COBERTURA DE PREEXISTENCIA",
-        "TOPE DE COASEGURO",
-        "PERIODOS DE ESPERA",
-        "PENALIZACIÓN",
-        "PENALIZACION",
-        "TERAPIA GÉNICA",
-        "TERAPIA GENICA",
-    )
-    out = []
-    for page_no in sorted(pages):
-        text = flat_page_text(pages, page_no)
-        upper = text.upper()
-        if not any(key in upper for key in keys):
-            continue
-        out.append(page_no)
-    return out
-
-
 def empty_final() -> dict:
     return {
         "document": {"document_type": None, "language": None, "page_count": None},
@@ -566,6 +567,7 @@ def empty_final() -> dict:
         "policy_conditions": [],
         "regulatory": {"registration_number": None, "registration_date": None, "source_page": None},
         "document_sections": [],
+        "condition_heading_audit": [],
         "validation": {"warnings": []},
     }
 
