@@ -24,7 +24,7 @@ graphify-out/
 Archive/
 
 # Policy sources and other client-data documents, regardless of location
-fixtures/
+test_policies/
 *.pdf
 *.doc
 *.docx
@@ -34,11 +34,11 @@ fixtures/
 *.tsv
 *.xls
 *.xlsx
-polizas/
+policy_library/
 
 # All generated/intermediate policy results
 outputs/
-tmp/
+audit_logs/
 *.json
 
 # The schema is the only JSON file intended for version control

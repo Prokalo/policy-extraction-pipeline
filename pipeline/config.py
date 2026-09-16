@@ -10,7 +10,7 @@ class PipelineConfig:
     model_name: str = "qwen3:8b"
     schema_path: Path = Path("insurance_schema_v3.json")
     outputs_dir: Path = Path("outputs")
-    runs_dir: Path = Path("tmp/runs")
+    runs_dir: Path = Path("audit_logs/runs")
     ollama_temperature: int = 0
     ollama_num_predict: int = 4096
     ollama_num_ctx: int = 32768
