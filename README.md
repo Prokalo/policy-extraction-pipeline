@@ -60,7 +60,7 @@ python process_policy.py path/to/policy.pdf
 For example:
 
 ```bash
-python process_policy.py fixtures/poliza_1_asegurado.pdf
+python process_policy.py test_policies/gmm_linea_azul_746129345.pdf
 ```
 
 Use a different Ollama model or schema:
@@ -75,7 +75,7 @@ Reuse an existing Docling conversion to skip the PDF-to-Docling stage:
 
 ```bash
 python process_policy.py path/to/policy.pdf \
-  --docling-json tmp/runs/<previous-run>/01_docling.json
+  --docling-json runs/reruns_with_docling/<previous-run>/01_docling.json
 ```
 
 The original PDF is still required when `--docling-json` is supplied because the GNP parser and validator inspect it directly.
@@ -93,7 +93,7 @@ The original PDF is still required when `--docling-json` is supplied because the
 Each invocation creates a timestamped diagnostic directory:
 
 ```text
-tmp/runs/<pdf-name>_<YYYYMMDD_HHMMSS>/
+runs/<pdf-name>_<YYYYMMDD_HHMMSS>/
 ├── 01_docling.json
 ├── 02_extracted.json
 ├── 03_gnp_coverages.json
@@ -156,7 +156,7 @@ Defaults live in `pipeline/config.py`:
 | Ollama model | `qwen3:8b` |
 | Schema | `insurance_schema_v3.json` |
 | Final output directory | `outputs/` |
-| Run artifact directory | `tmp/runs/` |
+| Run artifact directory | `runs/` |
 | Temperature | `0` |
 | Maximum predicted tokens | `4096` |
 | Context window | `32768` |
@@ -190,9 +190,9 @@ data, output_path, report = run_pipeline(Path("path/to/policy.pdf"), config)
 │   ├── validate.py                   # Current final validator
 │   └── *_v*.py / final_validate.py   # Earlier standalone pipeline stages
 ├── tests/                            # Unit and fixture regression tests
-├── fixtures/                         # Sample policy PDFs
+├── test_policies/                    # Sample policy PDFs
 ├── outputs/                          # Example/final validated JSON files
-├── tmp/                              # Intermediate and rerun artifacts
+├── runs/                             # Intermediate and rerun artifacts
 ├── Archive/                          # Superseded scripts and historical outputs
 └── graphify-out/                     # Generated code-graph analysis artifacts
 ```
@@ -211,7 +211,7 @@ Tests cover dynamic insured discovery, condition extraction and routing, coverag
 
 ### Current fixture caveat
 
-`tests/test_gnp_dynamic_pipeline.py` hard-codes timestamped Docling and extraction artifacts under `tmp/runs/`. In the current checkout, the referenced `poliza_2_asegurados_20260904_100013` directory is absent. As a result, the suite currently reports 17 passing tests and 6 `FileNotFoundError` errors. Restore that run directory or update `FIXTURE_RUNS` to an available matching artifact before treating those fixture regressions as runnable.
+`tests/test_gnp_dynamic_pipeline.py` hard-codes timestamped Docling and extraction artifacts under `runs/`. In the current checkout, the referenced `poliza_2_asegurados_20260904_100013` directory is absent. As a result, the suite currently reports 17 passing tests and 6 `FileNotFoundError` errors. Restore that run directory or update `FIXTURE_RUNS` to an available matching artifact before treating those fixture regressions as runnable.
 
 The unit tests mock Ollama calls where appropriate; running the full CLI requires a live Ollama service and the selected model.
 
