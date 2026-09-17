@@ -46,3 +46,6 @@ audit_logs/
 
 # This regression test embeds client names, customer codes, and birth dates
 tests/test_gnp_dynamic_pipeline.py
+
+# This shows how the product will form 
+architecture-plans/

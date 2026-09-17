@@ -38,43 +38,47 @@ The GNP parser is deliberately deterministic where the PDF layout is reliable. I
 - The default Ollama model is `qwen3:8b`.
 - Runtime Python packages: `docling`, `ollama`, `pymupdf`, and `jsonschema`.
 
-This repository currently has no dependency manifest or lock file. To create an environment manually:
+Dependencies are declared in `pyproject.toml`. To create an environment with `uv`:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install docling ollama pymupdf jsonschema
+uv sync
 ollama pull qwen3:8b
 ```
 
-`process_policy.py` also attempts to add packages from the repository's `.venv` to `sys.path`, but activating the environment is recommended.
+Run commands through `uv`:
+
+```bash
+uv run python process_policy.py path/to/policy.pdf
+```
+
+`process_policy.py` also attempts to add packages from the repository's `.venv` to `sys.path`, but using `uv run` is recommended.
 
 ## Usage
 
 Run the complete pipeline from the repository root:
 
 ```bash
-python process_policy.py path/to/policy.pdf
+uv run python process_policy.py path/to/policy.pdf
 ```
 
 For example:
 
 ```bash
-python process_policy.py test_policies/gmm_linea_azul_746129345.pdf
+uv run python process_policy.py test_policies/gmm_linea_azul_746129345.pdf
 ```
 
 Use a different Ollama model or schema:
 
 ```bash
-python process_policy.py path/to/policy.pdf \
+uv run python process_policy.py path/to/policy.pdf \
   --model qwen3:8b \
-  --schema insurance_schema_v3.json
+  --schema schemas/gmm/policy/v3.json
 ```
 
 Reuse an existing Docling conversion to skip the PDF-to-Docling stage:
 
 ```bash
-python process_policy.py path/to/policy.pdf \
+uv run python process_policy.py path/to/policy.pdf \
   --docling-json audit_logs/reruns_with_docling/<previous-run>/01_docling.json
 ```
 
@@ -112,7 +116,7 @@ Reprocessing the same PDF creates a new run directory but overwrites its final f
 
 ## Output model
 
-`insurance_schema_v3.json` defines the final contract. Its top-level fields are:
+`schemas/gmm/policy/v3.json` defines the current final contract for GMM policy output. Its top-level fields are:
 
 | Field | Contents |
 | --- | --- |
@@ -142,7 +146,7 @@ The final validator:
 - detects duplicate coverages;
 - reconciles condition and mixed-currency warnings;
 - applies GNP Premier foreign-care corrections;
-- validates the full result against `insurance_schema_v3.json`;
+- validates the full result against `schemas/gmm/policy/v3.json` by default;
 - sets `validation.summary.sql_ready` to `true` only when no high-severity warnings remain.
 
 A schema-valid document can still be non-SQL-ready when a business or provenance check emits a high-severity warning.
@@ -154,7 +158,7 @@ Defaults live in `pipeline/config.py`:
 | Setting | Default |
 | --- | --- |
 | Ollama model | `qwen3:8b` |
-| Schema | `insurance_schema_v3.json` |
+| Schema | `schemas/gmm/policy/v3.json` |
 | Final output directory | `outputs/` |
 | Run artifact directory | `audit_logs/runs/` |
 | Temperature | `0` |
@@ -181,7 +185,11 @@ data, output_path, report = run_pipeline(Path("path/to/policy.pdf"), config)
 ```text
 .
 ├── process_policy.py                 # Supported end-to-end CLI and orchestrator
-├── insurance_schema_v3.json          # Final JSON Schema contract
+├── schemas/
+│   ├── gmm/policy/v3.json            # Current GMM policy JSON Schema contract
+│   ├── autos/policy/v1.json          # Placeholder schema; autos extraction not implemented
+│   ├── daños/policy/v1.json          # Placeholder schema; daños extraction not implemented
+│   └── vida/policy/v1.json           # Placeholder schema; vida extraction not implemented
 ├── pipeline/
 │   ├── config.py                     # Runtime defaults and output paths
 │   ├── bootstrap.py                  # Local .venv discovery
@@ -201,10 +209,10 @@ For new integrations, use `process_policy.py` and the modules it imports. The ve
 
 ## Tests
 
-The suite uses Python's standard `unittest` runner:
+The suite can be run with `pytest`:
 
 ```bash
-python -m unittest discover -s tests -v
+uv run pytest
 ```
 
 Tests cover dynamic insured discovery, condition extraction and routing, coverage isolation, premium reconciliation, foreign-care matrices, string sanitization, schema validity, and SQL readiness.
