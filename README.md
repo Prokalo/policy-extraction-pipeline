@@ -1,4 +1,4 @@
-# GNP Policy Extraction Pipeline
+# Insurance Policy Extraction Pipeline
 
 A hybrid extraction pipeline that converts Spanish-language GNP medical insurance policy PDFs into structured, provenance-aware, schema-validated JSON.
 
