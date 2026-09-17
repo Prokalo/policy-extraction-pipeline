@@ -1,5 +1,5 @@
 [project]
-name = "docling-test"
+name = "policy-extraction"
 version = "0.1.0"
 description = "GNP insurance policy PDF extraction pipeline."
 requires-python = ">=3.14"

@@ -49,3 +49,4 @@ tests/test_gnp_dynamic_pipeline.py
 
 # This shows how the product will form 
 architecture-plans/
+extraction-logs/
