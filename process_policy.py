@@ -59,11 +59,14 @@ def dispatch_ramo_branch(
     run_dir: Path,
 ) -> tuple[dict, dict]:
     if ramo == "GMM":
+        print("Correclty classified as GMM, moving on to valudation")
         parsed_data, branch_report = process_gnp_policy(extracted_data, pdf_path, run_dir)
         branch_report = {"ramo": ramo, "branch": "gnp_gmm", "status": "completed", **branch_report}
         return parsed_data, branch_report
     if ramo in PLANNED_RAMO_BRANCHES:
+        print(f"Correclty classified as {ramo}, moving on to valudation")
         raise PipelineFailure(f"Document routed to {ramo}, but the {ramo} extraction branch is not implemented yet.")
+    print("failed to passed classifer")
     raise PipelineFailure(f"Document routed to unsupported branch: {ramo}.")
 
 
