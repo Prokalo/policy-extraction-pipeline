@@ -43,6 +43,9 @@ audit_logs/
 
 # The schema is the only JSON file intended for version control
 !insurance_schema_v3.json
+!config/
+!config/router/
+!config/router/ramo_signals.json
 
 # This regression test embeds client names, customer codes, and birth dates
 tests/test_gnp_dynamic_pipeline.py

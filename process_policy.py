@@ -12,6 +12,7 @@ activate_local_venv()
 from pipeline.config import DEFAULT_CONFIG, PipelineConfig
 from pipeline.extract import convert_pdf_to_docling_dict, extract_policy_from_docling, load_json, save_json
 from pipeline.parsers.gnp import process_gnp_policy
+from pipeline.router import load_ramo_signals, route_document
 from pipeline.validate import validate_policy
 
 
@@ -24,12 +25,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("pdf", help="Path to source policy PDF.")
     parser.add_argument("--model", default=DEFAULT_CONFIG.model_name)
     parser.add_argument("--schema", default=str(DEFAULT_CONFIG.schema_path))
+    parser.add_argument("--ramo-signals", default=str(DEFAULT_CONFIG.ramo_signals_path))
     parser.add_argument("--docling-json", help="Optional precomputed Docling JSON to reuse.")
     return parser.parse_args()
 
 
 def build_config(args: argparse.Namespace) -> PipelineConfig:
-    return PipelineConfig(model_name=args.model, schema_path=Path(args.schema))
+    return PipelineConfig(
+        model_name=args.model,
+        schema_path=Path(args.schema),
+        ramo_signals_path=Path(args.ramo_signals),
+    )
 
 
 def high_severity_issues(data: dict) -> list[str]:
@@ -57,6 +63,18 @@ def run_pipeline(pdf_path: Path, config: PipelineConfig, docling_json_override: 
     extracted_path = run_dir / "02_extracted.json"
     save_json(extracted_data, extracted_path)
 
+    router_config = load_ramo_signals(config.ramo_signals_path)
+    router_scores, router_result = route_document(extracted_data, docling_data, router_config)
+    router_scores_path = run_dir / "router_scores.json"
+    router_result_path = run_dir / "router_result.json"
+    save_json(router_scores, router_scores_path)
+    save_json(router_result, router_result_path)
+    if router_result["route_to"] != "GMM":
+        raise PipelineFailure(
+            "Document routed to manual review: "
+            f"ramo={router_result['classified_ramo']} confidence={router_result['confidence']}"
+        )
+
     parsed_data, gnp_report = process_gnp_policy(extracted_data, pdf_path, run_dir)
     validated_data, validation_report = validate_policy(parsed_data, pdf_path, config.schema_path)
 
@@ -67,8 +85,11 @@ def run_pipeline(pdf_path: Path, config: PipelineConfig, docling_json_override: 
         "run_dir": str(run_dir),
         "docling_path": str(docling_path),
         "extracted_path": str(extracted_path),
+        "router_scores_path": str(router_scores_path),
+        "router_result_path": str(router_result_path),
         "output_path": str(output_path),
         "extraction": extraction_report,
+        "router": router_result,
         "gnp": gnp_report,
         "validation": validation_report,
     }
@@ -95,6 +116,9 @@ def main() -> int:
     print(f"Run folder: {report['run_dir']}")
     print(f"Docling JSON: {report['docling_path']}")
     print(f"Extracted JSON: {report['extracted_path']}")
+    print(f"Router scores: {report['router_scores_path']}")
+    print(f"Router result: {report['router_result_path']}")
+    print(f"Ramo: {report['router']['classified_ramo']} ({report['router']['confidence']})")
     print(f"Validated JSON: {output_path}")
     print(f"GNP layout: {report['gnp']['layout']}")
     print(f"Insureds: {report['extraction']['insured_count']}")

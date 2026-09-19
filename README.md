@@ -19,7 +19,11 @@ flowchart LR
     D --> DJ[01_docling.json]
     DJ --> L[Ollama structured extraction]
     L --> EJ[02_extracted.json]
-    EJ --> G[GNP deterministic parser]
+    EJ --> R[Document router]
+    R --> RS[router_scores.json]
+    R --> RR[router_result.json]
+    RR -->|GMM confidence >= 90| G[GNP deterministic parser]
+    RR -->|UNKNOWN| MR[Manual review]
     PDF --> G
     G --> C[Coverage repair]
     C --> PC[Condition cleanup]
@@ -30,6 +34,8 @@ flowchart LR
 ```
 
 The GNP parser is deliberately deterministic where the PDF layout is reliable. It re-reads the source PDF to repair coverage rows, route and deduplicate conditions, reconstruct foreign-care rules, extract document sections, and normalize page-one metadata. The LLM is used for constrained extraction rather than as the final authority.
+
+The document router sits between structured extraction and branch-specific parsing. Its rules live in `config/router/ramo_signals.json`, runtime scores are saved to `router_scores.json`, and the routing/eval summary is saved to `router_result.json`. Current branch execution continues only when the router classifies the document as `GMM` with confidence at or above the configured threshold; lower-confidence documents route to manual review as `UNKNOWN`.
 
 ## Requirements
 
@@ -100,6 +106,8 @@ Each invocation creates a timestamped diagnostic directory:
 audit_logs/runs/<pdf-name>_<YYYYMMDD_HHMMSS>/
 ├── 01_docling.json
 ├── 02_extracted.json
+├── router_scores.json
+├── router_result.json
 ├── 03_gnp_coverages.json
 ├── 04_gnp_cleaned.json
 ├── 05_gnp_normalized.json
@@ -161,6 +169,7 @@ Defaults live in `pipeline/config.py`:
 | Schema | `schemas/gmm/policy/v3.json` |
 | Final output directory | `outputs/` |
 | Run artifact directory | `audit_logs/runs/` |
+| RAMO router signals | `config/router/ramo_signals.json` |
 | Temperature | `0` |
 | Maximum predicted tokens | `4096` |
 | Context window | `32768` |

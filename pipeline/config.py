@@ -9,6 +9,7 @@ from pathlib import Path
 class PipelineConfig:
     model_name: str = "qwen3:8b"
     schema_path: Path = Path("schemas/gmm/policy/v3.json")
+    ramo_signals_path: Path = Path("config/router/ramo_signals.json")
     outputs_dir: Path = Path("outputs")
     runs_dir: Path = Path("audit_logs/runs")
     ollama_temperature: int = 0

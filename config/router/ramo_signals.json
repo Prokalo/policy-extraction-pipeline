@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "minimum_confidence": 90.0,
+  "ramo_order": ["GMM", "VIDA", "AUTOS", "DAÑOS"],
+  "signals": {
+    "GMM": [
+      {
+        "id": "gmm_explicit_product",
+        "weight": 40,
+        "patterns": ["gastos medicos mayores", "gastos medicos", "gmm"]
+      },
+      {
+        "id": "gmm_certificate_layout",
+        "weight": 25,
+        "patterns": ["certificado de cobertura por asegurado", "coberturas y servicios", "condiciones especiales"]
+      },
+      {
+        "id": "gmm_medical_coverages",
+        "weight": 25,
+        "patterns": ["deducible", "coaseguro", "hospitalario", "emergencia medica", "enfermedades catastroficas"]
+      },
+      {
+        "id": "gmm_known_plans",
+        "weight": 20,
+        "patterns": ["linea azul", "premier", "omnia", "vinculo mundial", "personaliza", "indemniza"]
+      }
+    ],
+    "VIDA": [
+      {
+        "id": "vida_explicit_product",
+        "weight": 45,
+        "patterns": ["seguro de vida", "vida individual", "vida grupo", "vida dotal"]
+      },
+      {
+        "id": "vida_benefits",
+        "weight": 30,
+        "patterns": ["fallecimiento", "muerte accidental", "invalidez", "supervivencia"]
+      },
+      {
+        "id": "vida_parties",
+        "weight": 25,
+        "patterns": ["beneficiario", "beneficiarios", "asegurado titular vida"]
+      }
+    ],
+    "AUTOS": [
+      {
+        "id": "autos_explicit_product",
+        "weight": 45,
+        "patterns": ["seguro de automovil", "seguro de auto", "autos", "automoviles"]
+      },
+      {
+        "id": "autos_vehicle_identity",
+        "weight": 35,
+        "patterns": ["vehiculo", "placas", "numero de serie", "numero de motor", "marca", "modelo"]
+      },
+      {
+        "id": "autos_coverages",
+        "weight": 25,
+        "patterns": ["danos materiales", "robo total", "responsabilidad civil autos", "gastos medicos ocupantes"]
+      }
+    ],
+    "DAÑOS": [
+      {
+        "id": "danos_explicit_product",
+        "weight": 45,
+        "patterns": ["seguro de danos", "hogar", "empresarial", "comercio", "inmueble"]
+      },
+      {
+        "id": "danos_property_identity",
+        "weight": 35,
+        "patterns": ["edificio", "contenidos", "casa habitacion", "ubicacion del riesgo", "predio"]
+      },
+      {
+        "id": "danos_coverages",
+        "weight": 25,
+        "patterns": ["incendio", "terremoto", "fenomenos hidrometeorologicos", "responsabilidad civil familiar"]
+      }
+    ]
+  }
+}
