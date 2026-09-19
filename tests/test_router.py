@@ -20,7 +20,7 @@ class DocumentRouterTests(unittest.TestCase):
         docling = {
             "texts": [
                 {
-                    "text": "CERTIFICADO DE COBERTURA POR ASEGURADO con deducible y coaseguro",
+                    "text": "CERTIFICADO DE COBERTURA POR ASEGURADO con tope de coaseguro",
                     "prov": [{"page_no": 2}],
                 }
             ],
@@ -36,7 +36,7 @@ class DocumentRouterTests(unittest.TestCase):
 
     def test_confident_gmm_routes_to_gmm_branch(self):
         extracted = {"policy": {"product_line": "GMM", "plan_name": "Premier 300 Omnia"}}
-        docling = {"texts": [{"text": "Coberturas y Servicios deducible coaseguro", "prov": [{"page_no": 1}]}]}
+        docling = {"texts": [{"text": "Coberturas y Servicios Suma Asegurada tope de coaseguro", "prov": [{"page_no": 1}]}]}
 
         _scores, result = route_document(extracted, docling)
 
@@ -65,7 +65,7 @@ class DocumentRouterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
             (run_dir / "01_docling.json").write_text(
-                '{"texts":[{"text":"CERTIFICADO DE COBERTURA POR ASEGURADO deducible coaseguro","prov":[{"page_no":1}]}],"tables":[]}',
+                '{"texts":[{"text":"CERTIFICADO DE COBERTURA POR ASEGURADO tope de coaseguro","prov":[{"page_no":1}]}],"tables":[]}',
                 encoding="utf-8",
             )
             (run_dir / "02_extracted.json").write_text(

@@ -7,73 +7,78 @@
       {
         "id": "gmm_explicit_product",
         "weight": 40,
-        "patterns": ["gastos medicos mayores", "gastos medicos", "gmm"]
+        "patterns": ["gastos medicos mayores", "gastos medicos", "seguro medico gnp", "gmm"]
       },
       {
         "id": "gmm_certificate_layout",
         "weight": 25,
-        "patterns": ["certificado de cobertura por asegurado", "coberturas y servicios", "condiciones especiales"]
+        "patterns": ["certificado de cobertura por asegurado", "coberturas y servicios suma asegurada", "condiciones especiales", "prima del asegurado"]
       },
       {
         "id": "gmm_medical_coverages",
         "weight": 25,
-        "patterns": ["deducible", "coaseguro", "hospitalario", "emergencia medica", "enfermedades catastroficas"]
+        "patterns": ["nivel hospitalario", "membresia medica movil", "emergencia medica en el extranjero", "enfermedades catastroficas", "cobertura de preexistencia", "tope de coaseguro"]
       },
       {
         "id": "gmm_known_plans",
         "weight": 20,
-        "patterns": ["linea azul", "premier", "omnia", "vinculo mundial", "personaliza", "indemniza"]
+        "patterns": ["linea azul", "premier", "omnia", "vinculo mundial", "personaliza", "indemniza", "flexible ambar", "solidez familiar", "versatil", "conexion plus", "conexion garantia"]
       }
     ],
     "VIDA": [
       {
         "id": "vida_explicit_product",
         "weight": 45,
-        "patterns": ["seguro de vida", "vida individual", "vida grupo", "vida dotal"]
+        "patterns": ["seguro de vida", "vida individual", "vida grupo", "vida dotal", "poliza de seguro de vida"]
       },
       {
         "id": "vida_benefits",
         "weight": 30,
-        "patterns": ["fallecimiento", "muerte accidental", "invalidez", "supervivencia"]
+        "patterns": ["fallecimiento", "muerte accidental", "invalidez", "supervivencia", "ultimos gastos", "proteccion por fallecimiento", "proteccion por supervivencia"]
       },
       {
         "id": "vida_parties",
         "weight": 25,
-        "patterns": ["beneficiario", "beneficiarios", "asegurado titular vida"]
+        "patterns": ["beneficiario", "beneficiarios", "parentesco", "porcentaje de distribucion"]
+      },
+      {
+        "id": "vida_cash_value",
+        "weight": 20,
+        "patterns": ["tabla de valores garantizados", "valor en efectivo", "seguro prorrogado"]
       }
     ],
     "AUTOS": [
       {
         "id": "autos_explicit_product",
         "weight": 45,
-        "patterns": ["seguro de automovil", "seguro de auto", "autos", "automoviles"]
+        "patterns": ["seguro de automovil", "seguro de auto", "autos", "automoviles", "autos amplia"]
       },
       {
         "id": "autos_vehicle_identity",
         "weight": 35,
-        "patterns": ["vehiculo", "placas", "numero de serie", "numero de motor", "marca", "modelo"]
+        "patterns": ["vehiculo asegurado", "placas", "serie", "motor", "marca", "modelo", "conductor habitual", "uso particular"]
       },
       {
         "id": "autos_coverages",
         "weight": 25,
-        "patterns": ["danos materiales", "robo total", "responsabilidad civil autos", "gastos medicos ocupantes"]
+        "patterns": ["danos materiales", "robo total", "responsabilidad civil danos a terceros", "responsabilidad civil ocupantes", "gastos medicos ocupantes", "club gnp", "valor convenido"]
       }
     ],
     "DAÑOS": [
       {
         "id": "danos_explicit_product",
         "weight": 45,
-        "patterns": ["seguro de danos", "hogar", "empresarial", "comercio", "inmueble"]
+        "patterns": ["seguro de danos", "hogar", "empresarial", "comercio", "inmueble", "resumen de la poliza"]
       },
       {
         "id": "danos_property_identity",
         "weight": 35,
-        "patterns": ["edificio", "contenidos", "casa habitacion", "ubicacion del riesgo", "predio"]
+        "patterns": ["edificio", "contenidos", "casa habitacion", "ubicacion", "caracteristicas del riesgo", "tipo constructivo"]
       },
       {
         "id": "danos_coverages",
         "weight": 25,
-        "patterns": ["incendio", "terremoto", "fenomenos hidrometeorologicos", "responsabilidad civil familiar"]
+        "patterns": ["desglose de coberturas y servicios amparados", "incendio", "terremoto", "riesgos hidrometeorologicos", "responsabilidad civil del propietario", "rotura de cristales", "remocion de escombros", "menaje de casa"]
       }
     ]
   }
