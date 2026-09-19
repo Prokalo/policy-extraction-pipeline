@@ -20,6 +20,10 @@ class PipelineFailure(RuntimeError):
     pass
 
 
+IMPLEMENTED_RAMO_BRANCHES = {"GMM"}
+PLANNED_RAMO_BRANCHES = {"VIDA", "AUTOS", "DAÑOS"}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("pdf", help="Path to source policy PDF.")
@@ -48,6 +52,21 @@ def high_severity_issues(data: dict) -> list[str]:
     return issues
 
 
+def dispatch_ramo_branch(
+    ramo: str,
+    extracted_data: dict,
+    pdf_path: Path,
+    run_dir: Path,
+) -> tuple[dict, dict]:
+    if ramo == "GMM":
+        parsed_data, branch_report = process_gnp_policy(extracted_data, pdf_path, run_dir)
+        branch_report = {"ramo": ramo, "branch": "gnp_gmm", "status": "completed", **branch_report}
+        return parsed_data, branch_report
+    if ramo in PLANNED_RAMO_BRANCHES:
+        raise PipelineFailure(f"Document routed to {ramo}, but the {ramo} extraction branch is not implemented yet.")
+    raise PipelineFailure(f"Document routed to unsupported branch: {ramo}.")
+
+
 def run_pipeline(pdf_path: Path, config: PipelineConfig, docling_json_override: str | None = None) -> tuple[dict, Path, dict]:
     config.ensure_dirs()
     run_dir = config.make_run_dir(pdf_path)
@@ -69,13 +88,34 @@ def run_pipeline(pdf_path: Path, config: PipelineConfig, docling_json_override: 
     router_result_path = run_dir / "router_result.json"
     save_json(router_scores, router_scores_path)
     save_json(router_result, router_result_path)
-    if router_result["route_to"] != "GMM":
+    branch_dispatch = {
+        "classified_ramo": router_result["classified_ramo"],
+        "confidence": router_result["confidence"],
+        "route_to": router_result["route_to"],
+        "implemented_branches": sorted(IMPLEMENTED_RAMO_BRANCHES),
+        "planned_branches": sorted(PLANNED_RAMO_BRANCHES),
+        "status": "pending",
+    }
+    branch_dispatch_path = run_dir / "branch_dispatch.json"
+    if router_result["route_to"] == "MANUAL_REVIEW":
+        branch_dispatch["status"] = "manual_review"
+        save_json(branch_dispatch, branch_dispatch_path)
         raise PipelineFailure(
             "Document routed to manual review: "
             f"ramo={router_result['classified_ramo']} confidence={router_result['confidence']}"
         )
 
-    parsed_data, gnp_report = process_gnp_policy(extracted_data, pdf_path, run_dir)
+    try:
+        parsed_data, branch_report = dispatch_ramo_branch(router_result["route_to"], extracted_data, pdf_path, run_dir)
+    except PipelineFailure as exc:
+        branch_dispatch["status"] = "not_implemented_or_unsupported"
+        branch_dispatch["error"] = str(exc)
+        save_json(branch_dispatch, branch_dispatch_path)
+        raise
+    branch_dispatch["status"] = "completed"
+    branch_dispatch["branch"] = branch_report.get("branch")
+    save_json(branch_dispatch, branch_dispatch_path)
+
     validated_data, validation_report = validate_policy(parsed_data, pdf_path, config.schema_path)
 
     output_path = config.final_output_path(pdf_path)
@@ -87,10 +127,12 @@ def run_pipeline(pdf_path: Path, config: PipelineConfig, docling_json_override: 
         "extracted_path": str(extracted_path),
         "router_scores_path": str(router_scores_path),
         "router_result_path": str(router_result_path),
+        "branch_dispatch_path": str(branch_dispatch_path),
         "output_path": str(output_path),
         "extraction": extraction_report,
         "router": router_result,
-        "gnp": gnp_report,
+        "branch": branch_report,
+        "gnp": branch_report,
         "validation": validation_report,
     }
     return validated_data, output_path, report
@@ -119,16 +161,18 @@ def main() -> int:
     print(f"Router scores: {report['router_scores_path']}")
     print(f"Router result: {report['router_result_path']}")
     print(f"Ramo: {report['router']['classified_ramo']} ({report['router']['confidence']})")
+    print(f"Branch dispatch: {report['branch_dispatch_path']}")
     print(f"Validated JSON: {output_path}")
-    print(f"GNP layout: {report['gnp']['layout']}")
+    print(f"Branch: {report['branch']['branch']}")
+    print(f"GNP layout: {report['branch']['layout']}")
     print(f"Insureds: {report['extraction']['insured_count']}")
     for page_report in report["extraction"].get("condition_pages", []):
         print(
             "Condition page"
             f" {page_report['page']}: extracted={page_report['extracted_headings']} failed={page_report['failed_headings']}"
         )
-    print(f"Policy conditions: {report['gnp']['final_policy_conditions']}")
-    print(f"Insured condition counts: {report['gnp'].get('final_insured_condition_counts')}")
+    print(f"Policy conditions: {report['branch']['final_policy_conditions']}")
+    print(f"Insured condition counts: {report['branch'].get('final_insured_condition_counts')}")
     print(f"Schema errors: {report['validation']['schema_error_count']}")
     print(f"High severity warnings: {summary.get('high_severity_count')}")
     print(f"SQL ready: {summary.get('sql_ready')}")
