@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CLASSIFIED_MODULES = [
     ROOT / "pipeline" / "branches" / "gmm" / "extract.py",
     ROOT / "pipeline" / "branches" / "gmm" / "validate.py",
-    ROOT / "pipeline" / "parsers" / "gnp.py",
+    ROOT / "pipeline" / "branches" / "gmm" / "parser.py",
 ]
 VALID_CLASSIFICATIONS = {"COMMON", "GMM-SPECIFIC"}
 

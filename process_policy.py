@@ -10,8 +10,9 @@ from pipeline.bootstrap import activate_local_venv
 activate_local_venv()
 
 from pipeline.config import DEFAULT_CONFIG, PipelineConfig
-from pipeline.branches.gmm.extract import convert_pdf_to_docling_dict, extract_policy_from_docling, load_json, save_json
-from pipeline.parsers.gnp import process_gnp_policy
+from pipeline.common.json_utils import convert_pdf_to_docling_dict, load_json, save_json
+from pipeline.branches.gmm.extract import extract_policy_from_docling
+from pipeline.branches.gmm.parser import process_gnp_policy
 from pipeline.router import load_ramo_signals, route_document
 from pipeline.branches.gmm.validate import validate_policy
 

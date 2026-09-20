@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from pipeline.config import PipelineConfig
 from pipeline.branches.gmm.extract import canonical_condition_heading, extract_policy_from_docling
-from pipeline.parsers.gnp import (
+from pipeline.branches.gmm.parser import (
     clean_policy_conditions,
     match_coverage_spans,
     rebuild_additional_certificate_conditions,
@@ -210,7 +210,7 @@ class ConditionSectionTests(unittest.TestCase):
         self.assertIsNone(canonical_condition_heading(item))
 
     def test_condition_signature_handles_mixed_null_and_numeric_rule_values(self):
-        from pipeline.parsers.gnp import condition_sig
+        from pipeline.branches.gmm.parser import condition_sig
 
         condition = {
             "condition_type": "Tope de coaseguro",

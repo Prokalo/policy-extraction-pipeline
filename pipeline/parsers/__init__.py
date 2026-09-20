@@ -1,1 +1,1 @@
-from pipeline.parsers.gnp import process_gnp_policy
+from pipeline.branches.gmm.parser import process_gnp_policy
