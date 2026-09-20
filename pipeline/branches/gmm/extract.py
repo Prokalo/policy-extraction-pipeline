@@ -13,6 +13,51 @@ from pipeline.config import PipelineConfig
 
 
 NOTES_MAX_LENGTH = 300
+COMMON = "COMMON"
+GMM_SPECIFIC = "GMM-SPECIFIC"
+
+# Function reuse inventory. COMMON functions are candidates for shared branch
+# utilities; GMM-SPECIFIC functions encode the current Gastos Médicos flow.
+FUNCTION_CLASSIFICATION = {
+    "load_json": COMMON,
+    "convert_pdf_to_docling_dict": COMMON,
+    "save_json": COMMON,
+    "norm": COMMON,
+    "deaccent": COMMON,
+    "keytext": COMMON,
+    "warning_schema": COMMON,
+    "money_schema": COMMON,
+    "condition_schema": GMM_SPECIFIC,
+    "coverage_schema": GMM_SPECIFIC,
+    "schema_policy_meta": GMM_SPECIFIC,
+    "schema_insured": GMM_SPECIFIC,
+    "schema_conditions": GMM_SPECIFIC,
+    "schema_condition_section": GMM_SPECIFIC,
+    "_scalar_strings": COMMON,
+    "validate_notes": COMMON,
+    "validate_structured_response": COMMON,
+    "call_structured": COMMON,
+    "build_page_evidence": COMMON,
+    "page_sort_y": COMMON,
+    "build_page_items": COMMON,
+    "clean_evidence_text": COMMON,
+    "format_page_item": COMMON,
+    "render_pages": COMMON,
+    "flat_page_text": COMMON,
+    "page_text_from_items": COMMON,
+    "canonical_condition_heading": GMM_SPECIFIC,
+    "render_page_items": COMMON,
+    "split_condition_sections": GMM_SPECIFIC,
+    "slugify": COMMON,
+    "condition_section_is_empty": COMMON,
+    "failure_warning_for_section": COMMON,
+    "extract_condition_sections": GMM_SPECIFIC,
+    "certificate_heading_page": GMM_SPECIFIC,
+    "detect_insured_anchor": GMM_SPECIFIC,
+    "discover_insured_certificate_blocks": GMM_SPECIFIC,
+    "empty_final": GMM_SPECIFIC,
+    "extract_policy_from_docling": GMM_SPECIFIC,
+}
 
 
 SYSTEM_PROMPT = """You are a strict Spanish insurance-policy extraction engine.

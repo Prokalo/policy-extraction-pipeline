@@ -23,6 +23,43 @@ DATE_FIELDS = {
 REQUIRED_POLICY_FIELDS = ["insurer", "policy_number", "coverage_start_date", "coverage_end_date"]
 REQUIRED_INSURED_FIELDS = ["insured_number", "name", "customer_code"]
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+COMMON = "COMMON"
+GMM_SPECIFIC = "GMM-SPECIFIC"
+
+# Function reuse inventory. COMMON functions are candidates for shared branch
+# validation utilities; GMM-SPECIFIC functions encode current GMM/GNP semantics.
+FUNCTION_CLASSIFICATION = {
+    "norm": COMMON,
+    "deaccent": COMMON,
+    "keytext": COMMON,
+    "parse_date": COMMON,
+    "sanitize_textual_artifacts": COMMON,
+    "sanitize_strings_recursive": COMMON,
+    "normalize_dates_recursive": COMMON,
+    "add_warning": COMMON,
+    "sanitize_labeled_placeholder": COMMON,
+    "normalize_contact_fields": COMMON,
+    "has_premier_400_exclusion": GMM_SPECIFIC,
+    "reconcile_condition_warnings": GMM_SPECIFIC,
+    "has_explicit_usd_coverage_values": COMMON,
+    "reconcile_currency_warnings": COMMON,
+    "dedupe_warnings": COMMON,
+    "fix_gnp_premier_foreign_care": GMM_SPECIFIC,
+    "locate_regulatory_page": COMMON,
+    "validate_required_identifiers": COMMON,
+    "validate_premiums": COMMON,
+    "validate_insured_premium_reconciliation": COMMON,
+    "iter_source_pages": COMMON,
+    "validate_provenance": COMMON,
+    "coverage_signature": COMMON,
+    "validate_duplicate_coverages": COMMON,
+    "validate_dates": COMMON,
+    "validate_agent_name": GMM_SPECIFIC,
+    "validate_condition_heading_completeness": GMM_SPECIFIC,
+    "validate_schema": COMMON,
+    "build_summary": COMMON,
+    "validate_policy": GMM_SPECIFIC,
+}
 
 
 def norm(s):
