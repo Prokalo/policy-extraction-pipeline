@@ -204,10 +204,11 @@ data, output_path, report = run_pipeline(Path("path/to/policy.pdf"), config)
 ├── pipeline/
 │   ├── config.py                     # Runtime defaults and output paths
 │   ├── bootstrap.py                  # Local .venv discovery
-│   ├── extract.py                    # Docling conversion and Ollama extraction
-│   ├── parsers/gnp.py                # Consolidated deterministic GNP parser
-│   ├── validate.py                   # Current final validator
-│   └── *_v*.py / final_validate.py   # Earlier standalone pipeline stages
+│   ├── common/                       # Shared text, table, money, date, LLM, JSON, and validation helpers
+│   ├── branches/gmm/extract.py       # GMM extraction flow
+│   ├── branches/gmm/parser.py        # Consolidated deterministic GNP/GMM parser
+│   ├── branches/gmm/validate.py      # GMM final validator
+│   └── router.py                     # RAMO router
 ├── tests/                            # Unit and fixture regression tests
 ├── test_policies/                    # Sample policy PDFs
 ├── outputs/                          # Example/final validated JSON files
@@ -244,6 +245,6 @@ The unit tests mock Ollama calls where appropriate; running the full CLI require
 
 ## Scope and data handling
 
-The parser contains GNP-specific Spanish headings, plan rules, and PDF layout heuristics. Supporting another insurer or materially different policy layout will require a separate parser or extensions to `pipeline/parsers/gnp.py`.
+The GMM parser contains GNP-specific Spanish headings, plan rules, and PDF layout heuristics. Supporting another insurer or materially different policy layout will require a separate branch parser such as `pipeline/branches/vida/parser.py`, `pipeline/branches/autos/parser.py`, or `pipeline/branches/daños/parser.py`.
 
 Policy PDFs and generated JSON can contain sensitive personal and financial information. Keep fixtures, run artifacts, debug output, and validated results out of public version control and handle them according to your organization's data-retention rules. The current `.gitignore` excludes these artifact directories.
