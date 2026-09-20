@@ -5,7 +5,6 @@ import json
 import re
 import unicodedata
 from pathlib import Path
-from typing import Any
 
 
 DEFAULT_RAMO_SIGNALS_PATH = Path("config/router/ramo_signals.json")
@@ -27,19 +26,6 @@ def keytext(text: str | None) -> str:
 
 def load_ramo_signals(path: Path = DEFAULT_RAMO_SIGNALS_PATH) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _scalar_text_records(value: Any, path: str = "$") -> list[dict]:
-    records = []
-    if isinstance(value, dict):
-        for key, child in value.items():
-            records.extend(_scalar_text_records(child, f"{path}.{key}"))
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            records.extend(_scalar_text_records(child, f"{path}[{index}]"))
-    elif isinstance(value, str) and norm(value):
-        records.append({"source": "extracted", "path": path, "text": norm(value), "page": None})
-    return records
 
 
 def _docling_records(docling_data: dict | None) -> list[dict]:
@@ -71,8 +57,8 @@ def _docling_records(docling_data: dict | None) -> list[dict]:
     return records
 
 
-def build_router_evidence(extracted_data: dict, docling_data: dict | None = None) -> list[dict]:
-    return _scalar_text_records(extracted_data) + _docling_records(docling_data)
+def build_router_evidence(docling_data: dict) -> list[dict]:
+    return _docling_records(docling_data)
 
 
 def _snippet(text: str, pattern: str) -> str:
@@ -108,12 +94,11 @@ def _match_signal(signal: dict, evidence_records: list[dict]) -> list[dict]:
 
 
 def score_document_ramo(
-    extracted_data: dict,
-    docling_data: dict | None = None,
+    docling_data: dict,
     signals_config: dict | None = None,
 ) -> dict:
     config = signals_config or load_ramo_signals()
-    evidence_records = build_router_evidence(extracted_data, docling_data)
+    evidence_records = build_router_evidence(docling_data)
     ramo_order = config.get("ramo_order") or sorted((config.get("signals") or {}).keys())
     scores = {}
     for ramo in ramo_order:
@@ -162,12 +147,11 @@ def build_router_result(router_scores: dict, ground_truth_ramo: str | None = Non
 
 
 def route_document(
-    extracted_data: dict,
-    docling_data: dict | None = None,
+    docling_data: dict,
     signals_config: dict | None = None,
     ground_truth_ramo: str | None = None,
 ) -> tuple[dict, dict]:
-    scores = score_document_ramo(extracted_data, docling_data, signals_config)
+    scores = score_document_ramo(docling_data, signals_config)
     return scores, build_router_result(scores, ground_truth_ramo)
 
 
@@ -181,16 +165,12 @@ def run_router_for_artifacts(
     ground_truth_ramo: str | None = None,
 ) -> tuple[dict, dict]:
     docling_path = run_dir / "01_docling.json"
-    extracted_path = run_dir / "02_extracted.json"
     if not docling_path.exists():
         raise FileNotFoundError(f"Missing Docling artifact: {docling_path}")
-    if not extracted_path.exists():
-        raise FileNotFoundError(f"Missing extracted artifact: {extracted_path}")
 
     docling_data = json.loads(docling_path.read_text(encoding="utf-8"))
-    extracted_data = json.loads(extracted_path.read_text(encoding="utf-8"))
     signals_config = load_ramo_signals(signals_path)
-    scores, result = route_document(extracted_data, docling_data, signals_config, ground_truth_ramo)
+    scores, result = route_document(docling_data, signals_config, ground_truth_ramo)
     save_json(scores, run_dir / "router_scores.json")
     save_json(result, run_dir / "router_result.json")
     return scores, result
@@ -198,7 +178,7 @@ def run_router_for_artifacts(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the RAMO router from saved pipeline artifacts.")
-    parser.add_argument("run_dir", help="Run directory containing 01_docling.json and 02_extracted.json.")
+    parser.add_argument("run_dir", help="Run directory containing 01_docling.json.")
     parser.add_argument("--ramo-signals", default=str(DEFAULT_RAMO_SIGNALS_PATH))
     parser.add_argument("--ground-truth-ramo", choices=["GMM", "VIDA", "AUTOS", "DAÑOS", "UNKNOWN"])
     return parser.parse_args()

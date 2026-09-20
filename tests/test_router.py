@@ -10,15 +10,12 @@ from pipeline.router import build_router_result, route_document, run_router_for_
 
 class DocumentRouterTests(unittest.TestCase):
     def test_scores_every_ramo_and_preserves_matching_evidence(self):
-        extracted = {
-            "policy": {
-                "insurer": "GNP",
-                "product_line": "Gastos Médicos Mayores",
-                "plan_name": "Línea Azul Premier",
-            }
-        }
         docling = {
             "texts": [
+                {
+                    "text": "Póliza de Gastos Médicos Mayores Línea Azul Premier",
+                    "prov": [{"page_no": 1}],
+                },
                 {
                     "text": "CERTIFICADO DE COBERTURA POR ASEGURADO con tope de coaseguro",
                     "prov": [{"page_no": 2}],
@@ -27,7 +24,7 @@ class DocumentRouterTests(unittest.TestCase):
             "tables": [],
         }
 
-        scores = score_document_ramo(extracted, docling)
+        scores = score_document_ramo(docling)
 
         self.assertEqual(set(scores["scores"]), {"GMM", "VIDA", "AUTOS", "DAÑOS"})
         self.assertEqual(scores["scores"]["GMM"]["score"], 100.0)
@@ -35,10 +32,14 @@ class DocumentRouterTests(unittest.TestCase):
         self.assertEqual(scores["scores"]["GMM"]["evidence"][0]["signal_id"], "gmm_explicit_product")
 
     def test_confident_gmm_routes_to_gmm_branch(self):
-        extracted = {"policy": {"product_line": "GMM", "plan_name": "Premier 300 Omnia"}}
-        docling = {"texts": [{"text": "Coberturas y Servicios Suma Asegurada tope de coaseguro", "prov": [{"page_no": 1}]}]}
+        docling = {
+            "texts": [
+                {"text": "GMM Premier 300 Omnia", "prov": [{"page_no": 1}]},
+                {"text": "Coberturas y Servicios Suma Asegurada tope de coaseguro", "prov": [{"page_no": 1}]},
+            ]
+        }
 
-        _scores, result = route_document(extracted, docling)
+        _scores, result = route_document(docling)
 
         self.assertEqual(result["classified_ramo"], "GMM")
         self.assertEqual(result["route_to"], "GMM")
@@ -65,11 +66,7 @@ class DocumentRouterTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
             (run_dir / "01_docling.json").write_text(
-                '{"texts":[{"text":"CERTIFICADO DE COBERTURA POR ASEGURADO tope de coaseguro","prov":[{"page_no":1}]}],"tables":[]}',
-                encoding="utf-8",
-            )
-            (run_dir / "02_extracted.json").write_text(
-                '{"policy":{"product_line":"Gastos Médicos Mayores","plan_name":"Premier 300"}}',
+                '{"texts":[{"text":"Gastos Médicos Mayores Premier 300","prov":[{"page_no":1}]},{"text":"CERTIFICADO DE COBERTURA POR ASEGURADO tope de coaseguro","prov":[{"page_no":1}]}],"tables":[]}',
                 encoding="utf-8",
             )
 

@@ -54,15 +54,19 @@ def high_severity_issues(data: dict) -> list[str]:
 
 def dispatch_ramo_branch(
     ramo: str,
-    extracted_data: dict,
+    docling_data: dict,
+    config: PipelineConfig,
     pdf_path: Path,
     run_dir: Path,
-) -> tuple[dict, dict]:
+) -> tuple[dict, dict, dict, Path | None]:
     if ramo == "GMM":
         print("Correclty classified as GMM, moving on to valudation")
+        extracted_data, extraction_report = extract_policy_from_docling(docling_data, config, run_dir)
+        extracted_path = run_dir / "02_extracted.json"
+        save_json(extracted_data, extracted_path)
         parsed_data, branch_report = process_gnp_policy(extracted_data, pdf_path, run_dir)
         branch_report = {"ramo": ramo, "branch": "gnp_gmm", "status": "completed", **branch_report}
-        return parsed_data, branch_report
+        return parsed_data, branch_report, extraction_report, extracted_path
     if ramo in PLANNED_RAMO_BRANCHES:
         print(f"Correclty classified as {ramo}, moving on to valudation")
         raise PipelineFailure(f"Document routed to {ramo}, but the {ramo} extraction branch is not implemented yet.")
@@ -81,12 +85,8 @@ def run_pipeline(pdf_path: Path, config: PipelineConfig, docling_json_override: 
     docling_path = run_dir / "01_docling.json"
     save_json(docling_data, docling_path)
 
-    extracted_data, extraction_report = extract_policy_from_docling(docling_data, config, run_dir)
-    extracted_path = run_dir / "02_extracted.json"
-    save_json(extracted_data, extracted_path)
-
     router_config = load_ramo_signals(config.ramo_signals_path)
-    router_scores, router_result = route_document(extracted_data, docling_data, router_config)
+    router_scores, router_result = route_document(docling_data, router_config)
     router_scores_path = run_dir / "router_scores.json"
     router_result_path = run_dir / "router_result.json"
     save_json(router_scores, router_scores_path)
@@ -109,7 +109,13 @@ def run_pipeline(pdf_path: Path, config: PipelineConfig, docling_json_override: 
         )
 
     try:
-        parsed_data, branch_report = dispatch_ramo_branch(router_result["route_to"], extracted_data, pdf_path, run_dir)
+        parsed_data, branch_report, extraction_report, extracted_path = dispatch_ramo_branch(
+            router_result["route_to"],
+            docling_data,
+            config,
+            pdf_path,
+            run_dir,
+        )
     except PipelineFailure as exc:
         branch_dispatch["status"] = "not_implemented_or_unsupported"
         branch_dispatch["error"] = str(exc)
@@ -127,7 +133,7 @@ def run_pipeline(pdf_path: Path, config: PipelineConfig, docling_json_override: 
     report = {
         "run_dir": str(run_dir),
         "docling_path": str(docling_path),
-        "extracted_path": str(extracted_path),
+        "extracted_path": str(extracted_path) if extracted_path else None,
         "router_scores_path": str(router_scores_path),
         "router_result_path": str(router_result_path),
         "branch_dispatch_path": str(branch_dispatch_path),
