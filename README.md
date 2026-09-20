@@ -167,7 +167,8 @@ Defaults live in `pipeline/config.py`:
 | Setting | Default |
 | --- | --- |
 | Ollama model | `qwen3:8b` |
-| Schema | `schemas/gmm/policy/v3.json` |
+| Default GMM schema | `schemas/gmm/policy/v3.json` |
+| Branch schemas | `schemas/{gmm,vida,autos,daños}/policy/*.json` via `PipelineConfig.schema_path_for(ramo)` |
 | Final output directory | `outputs/` |
 | Run artifact directory | `audit_logs/runs/` |
 | RAMO router signals | `config/router/ramo_signals.json` |
@@ -176,7 +177,7 @@ Defaults live in `pipeline/config.py`:
 | Context window | `32768` |
 | Ollama retries | `2` |
 
-Only the model and schema are exposed as command-line options. Change other defaults by constructing a `PipelineConfig` in Python or editing the configuration module.
+Only the model and explicit schema override are exposed as command-line options. By default, validation uses the schema for the routed RAMO branch. Change other defaults by constructing a `PipelineConfig` in Python or editing the configuration module.
 
 The pipeline can also be called programmatically:
 

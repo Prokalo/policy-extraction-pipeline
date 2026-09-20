@@ -28,18 +28,21 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("pdf", help="Path to source policy PDF.")
     parser.add_argument("--model", default=DEFAULT_CONFIG.model_name)
-    parser.add_argument("--schema", default=str(DEFAULT_CONFIG.schema_path))
+    parser.add_argument("--schema", help="Override the routed branch schema path.")
     parser.add_argument("--ramo-signals", default=str(DEFAULT_CONFIG.ramo_signals_path))
     parser.add_argument("--docling-json", help="Optional precomputed Docling JSON to reuse.")
     return parser.parse_args()
 
 
 def build_config(args: argparse.Namespace) -> PipelineConfig:
-    return PipelineConfig(
-        model_name=args.model,
-        schema_path=Path(args.schema),
-        ramo_signals_path=Path(args.ramo_signals),
-    )
+    config_kwargs = {
+        "model_name": args.model,
+        "ramo_signals_path": Path(args.ramo_signals),
+    }
+    if args.schema:
+        config_kwargs["schema_path"] = Path(args.schema)
+        config_kwargs["schema_path_overrides_all_branches"] = True
+    return PipelineConfig(**config_kwargs)
 
 
 def high_severity_issues(data: dict) -> list[str]:
@@ -125,9 +128,10 @@ def run_pipeline(pdf_path: Path, config: PipelineConfig, docling_json_override: 
     branch_dispatch["branch"] = branch_report.get("branch")
     save_json(branch_dispatch, branch_dispatch_path)
 
-    validated_data, validation_report = validate_policy(parsed_data, pdf_path, config.schema_path)
+    validation_schema_path = config.schema_path_for(router_result["route_to"])
+    validated_data, validation_report = validate_policy(parsed_data, pdf_path, validation_schema_path)
 
-    output_path = config.final_output_path(pdf_path)
+    output_path = config.final_output_path(pdf_path, router_result["route_to"])
     save_json(validated_data, output_path)
 
     report = {
@@ -137,6 +141,7 @@ def run_pipeline(pdf_path: Path, config: PipelineConfig, docling_json_override: 
         "router_scores_path": str(router_scores_path),
         "router_result_path": str(router_result_path),
         "branch_dispatch_path": str(branch_dispatch_path),
+        "validation_schema_path": str(validation_schema_path),
         "output_path": str(output_path),
         "extraction": extraction_report,
         "router": router_result,
