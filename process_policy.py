@@ -10,10 +10,10 @@ from pipeline.bootstrap import activate_local_venv
 activate_local_venv()
 
 from pipeline.config import DEFAULT_CONFIG, PipelineConfig
-from pipeline.extract import convert_pdf_to_docling_dict, extract_policy_from_docling, load_json, save_json
+from pipeline.branches.gmm.extract import convert_pdf_to_docling_dict, extract_policy_from_docling, load_json, save_json
 from pipeline.parsers.gnp import process_gnp_policy
 from pipeline.router import load_ramo_signals, route_document
-from pipeline.validate import validate_policy
+from pipeline.branches.gmm.validate import validate_policy
 
 
 class PipelineFailure(RuntimeError):

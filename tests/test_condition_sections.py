@@ -6,13 +6,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from pipeline.config import PipelineConfig
-from pipeline.extract import canonical_condition_heading, extract_policy_from_docling
+from pipeline.branches.gmm.extract import canonical_condition_heading, extract_policy_from_docling
 from pipeline.parsers.gnp import (
     clean_policy_conditions,
     match_coverage_spans,
     rebuild_additional_certificate_conditions,
 )
-from pipeline.validate import validate_condition_heading_completeness
+from pipeline.branches.gmm.validate import validate_condition_heading_completeness
 
 
 def text_item(page_no: int, text: str, y: float, label: str = "text") -> dict:
@@ -242,7 +242,7 @@ class ConditionSectionTests(unittest.TestCase):
                 return condition_payload(prompt.split('"')[1], 7)
             raise AssertionError(tag)
 
-        with tempfile.TemporaryDirectory() as tmpdir, patch("pipeline.extract.call_structured", side_effect=fake_call):
+        with tempfile.TemporaryDirectory() as tmpdir, patch("pipeline.branches.gmm.extract.call_structured", side_effect=fake_call):
             final, report = extract_policy_from_docling(doc, PipelineConfig(), Path(tmpdir))
 
         self.assertEqual(report["condition_page_count"], 2)
@@ -335,7 +335,7 @@ class ConditionSectionTests(unittest.TestCase):
                 return condition_payload(prompt.split('"')[1], 7)
             raise AssertionError(tag)
 
-        with tempfile.TemporaryDirectory() as tmpdir, patch("pipeline.extract.call_structured", side_effect=fake_call):
+        with tempfile.TemporaryDirectory() as tmpdir, patch("pipeline.branches.gmm.extract.call_structured", side_effect=fake_call):
             final, report = extract_policy_from_docling(doc, PipelineConfig(), Path(tmpdir))
 
         self.assertTrue(any(

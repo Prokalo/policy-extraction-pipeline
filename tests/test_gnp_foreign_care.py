@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from pipeline.parsers.gnp import extract_foreign_care_matrix_from_doc, rebuild_foreign_care_condition
-from pipeline.validate import reconcile_condition_warnings, sanitize_strings_recursive
+from pipeline.branches.gmm.validate import reconcile_condition_warnings, sanitize_strings_recursive
 
 
 def foreign_care_doc(page_no: int = 4) -> dict:
