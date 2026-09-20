@@ -8,11 +8,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from pipeline.config import PipelineConfig
-from pipeline.branches.gmm.extract import (
+from pipeline.common.llm import call_structured, validate_structured_response
+from pipeline.common.tables import (
     build_page_items,
-    call_structured,
     clean_evidence_text,
-    validate_structured_response,
 )
 
 
@@ -100,7 +99,7 @@ class StructuredResponseValidationTests(unittest.TestCase):
         ]
         config = PipelineConfig(ollama_retries=1)
 
-        with tempfile.TemporaryDirectory() as tmpdir, patch("pipeline.branches.gmm.extract.chat", side_effect=responses) as mocked:
+        with tempfile.TemporaryDirectory() as tmpdir, patch("pipeline.common.llm.chat", side_effect=responses) as mocked:
             result = call_structured("model", self.SCHEMA, "one insured", config, Path(tmpdir), tag="insured_7")
             debug_path = Path(tmpdir) / "debug_insured_7_attempt_1.txt"
             self.assertEqual(debug_path.read_text(encoding="utf-8"), invalid_raw)

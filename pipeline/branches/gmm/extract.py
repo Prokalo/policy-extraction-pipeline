@@ -1,56 +1,35 @@
 from __future__ import annotations
 
-import json
 import re
-from collections import defaultdict
 from pathlib import Path
 
-from docling.document_converter import DocumentConverter
-from jsonschema import Draft202012Validator
-from ollama import chat
-
+from pipeline.common.json_utils import convert_pdf_to_docling_dict, load_json, save_json
+from pipeline.common.llm import NOTES_MAX_LENGTH, call_structured, money_schema, warning_schema
+from pipeline.common.tables import (
+    build_page_evidence,
+    build_page_items,
+    page_text_from_items,
+    render_page_items,
+    render_pages,
+)
+from pipeline.common.text import keytext, norm, slugify
+from pipeline.common.validation import condition_section_is_empty, failure_warning_for_section
 from pipeline.config import PipelineConfig
 
 
-NOTES_MAX_LENGTH = 300
 COMMON = "COMMON"
 GMM_SPECIFIC = "GMM-SPECIFIC"
 
-# Function reuse inventory. COMMON functions are candidates for shared branch
-# utilities; GMM-SPECIFIC functions encode the current Gastos Médicos flow.
+# Function reuse inventory. This branch file keeps only GMM-specific functions.
 FUNCTION_CLASSIFICATION = {
-    "load_json": COMMON,
-    "convert_pdf_to_docling_dict": COMMON,
-    "save_json": COMMON,
-    "norm": COMMON,
-    "deaccent": COMMON,
-    "keytext": COMMON,
-    "warning_schema": COMMON,
-    "money_schema": COMMON,
     "condition_schema": GMM_SPECIFIC,
     "coverage_schema": GMM_SPECIFIC,
     "schema_policy_meta": GMM_SPECIFIC,
     "schema_insured": GMM_SPECIFIC,
     "schema_conditions": GMM_SPECIFIC,
     "schema_condition_section": GMM_SPECIFIC,
-    "_scalar_strings": COMMON,
-    "validate_notes": COMMON,
-    "validate_structured_response": COMMON,
-    "call_structured": COMMON,
-    "build_page_evidence": COMMON,
-    "page_sort_y": COMMON,
-    "build_page_items": COMMON,
-    "clean_evidence_text": COMMON,
-    "format_page_item": COMMON,
-    "render_pages": COMMON,
-    "flat_page_text": COMMON,
-    "page_text_from_items": COMMON,
     "canonical_condition_heading": GMM_SPECIFIC,
-    "render_page_items": COMMON,
     "split_condition_sections": GMM_SPECIFIC,
-    "slugify": COMMON,
-    "condition_section_is_empty": COMMON,
-    "failure_warning_for_section": COMMON,
     "extract_condition_sections": GMM_SPECIFIC,
     "certificate_heading_page": GMM_SPECIFIC,
     "detect_insured_anchor": GMM_SPECIFIC,
@@ -60,16 +39,6 @@ FUNCTION_CLASSIFICATION = {
 }
 
 
-SYSTEM_PROMPT = """You are a strict Spanish insurance-policy extraction engine.
-Extract only facts explicitly supported by the supplied Docling evidence. Never invent; if uncertain return null.
-Preserve names, RFC/tax IDs, policy numbers, customer codes, Spanish plan names and coverage names exactly.
-Normalize pesos -> MXN and dls/dólares norteamericanos -> USD only in normalized currency fields.
-Never borrow sum insured, deductible, coinsurance, or service cost from an adjacent row. Values must belong to the same logical coverage row.
-If row association is uncertain, return null and add a warning. Preserve every row of rule tables.
-The notes field is only for meaningful facts not represented by another structured field. Never put a structured value in notes a second time.
-Never copy tables, Markdown table syntax, cell separators, empty cells, page formatting, or repeated whitespace into notes.
-Use null when there is no additional fact for notes, and never exceed 300 characters. Return JSON matching the supplied schema."""
-
 CONDITION_CHROME = {
     "poliza de seguro gastos medicos",
     "certificado de cobertura por asegurado",
@@ -78,50 +47,6 @@ CONDITION_CHROME = {
     "monto",
     "monto maximo a pagar",
 }
-
-
-def load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def convert_pdf_to_docling_dict(pdf_path: Path) -> dict:
-    converter = DocumentConverter()
-    result = converter.convert(pdf_path)
-    return json.loads(result.document.model_dump_json())
-
-
-def save_json(data: dict, path: Path) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def norm(text: str | None) -> str:
-    return re.sub(r"\s+", " ", text or "").strip()
-
-
-def deaccent(text: str | None) -> str:
-    import unicodedata
-
-    text = unicodedata.normalize("NFKD", text or "")
-    return "".join(ch for ch in text if not unicodedata.combining(ch))
-
-
-def keytext(text: str | None) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", deaccent(norm(text)).lower()).strip()
-
-
-def warning_schema():
-    return {"type": "object", "properties": {
-        "field": {"type": ["string", "null"]}, "issue": {"type": ["string", "null"]},
-        "severity": {"type": ["string", "null"], "enum": ["low", "medium", "high", None]},
-        "source_page": {"type": ["integer", "null"]}},
-        "required": ["field", "issue", "severity", "source_page"]}
-
-
-def money_schema():
-    return {"type": "object", "properties": {
-        "raw_value": {"type": ["string", "null"]}, "amount": {"type": ["number", "null"]},
-        "currency": {"type": ["string", "null"]}},
-        "required": ["raw_value", "amount", "currency"]}
 
 
 def condition_schema():
@@ -217,200 +142,6 @@ def schema_condition_section():
         "required": ["condition", "warnings"]}
 
 
-def _scalar_strings(value) -> list[str]:
-    if isinstance(value, dict):
-        return [item for key, child in value.items() if key != "notes" for item in _scalar_strings(child)]
-    if isinstance(value, list):
-        return [item for child in value for item in _scalar_strings(child)]
-    if isinstance(value, str):
-        return [norm(value)] if norm(value) else []
-    return []
-
-
-def validate_notes(value, path: str = "$") -> list[str]:
-    """Return errors for unsafe or duplicative notes anywhere in a model object."""
-    errors = []
-    if isinstance(value, dict):
-        note = value.get("notes")
-        if isinstance(note, str):
-            note_path = f"{path}.notes"
-            if not note.strip():
-                errors.append(f"{note_path} must be null when there is no additional information")
-            if len(note) > NOTES_MAX_LENGTH:
-                errors.append(f"{note_path} exceeds {NOTES_MAX_LENGTH} characters")
-            if "|" in note or re.search(r"(?:^|\n)\s*:?-{3,}:?\s*(?:\||$)", note):
-                errors.append(f"{note_path} contains table or separator artifacts")
-            if re.search(r"[\r\n\t]|\s{2,}", note):
-                errors.append(f"{note_path} contains page formatting or repeated whitespace")
-
-            note_key = keytext(note)
-            for structured_value in _scalar_strings(value):
-                structured_key = keytext(structured_value)
-                if len(structured_key) >= 8 and structured_key in note_key:
-                    errors.append(
-                        f"{note_path} duplicates structured value {structured_value!r}"
-                    )
-                    break
-        for key, child in value.items():
-            if key != "notes":
-                errors.extend(validate_notes(child, f"{path}.{key}"))
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
-            errors.extend(validate_notes(child, f"{path}[{index}]"))
-    return errors
-
-
-def validate_structured_response(value: object, schema: dict) -> None:
-    errors = [
-        f"{'.'.join(str(part) for part in error.absolute_path) or '$'}: {error.message}"
-        for error in Draft202012Validator(schema).iter_errors(value)
-    ]
-    errors.extend(validate_notes(value))
-    if errors:
-        raise ValueError("; ".join(errors[:10]))
-
-
-def call_structured(model: str, schema: dict, prompt: str, config: PipelineConfig, debug_dir: Path, tag: str = "call") -> dict:
-    last = None
-    retry_issue = None
-    for attempt in range(1, config.ollama_retries + 2):
-        content = ""
-        try:
-            attempt_prompt = prompt
-            if retry_issue:
-                attempt_prompt += (
-                    "\n\nYour previous response for this same object failed validation. "
-                    f"Correct only this object and return it again. Validation error: {retry_issue}"
-                )
-                if ".notes" in retry_issue:
-                    attempt_prompt += (
-                        "\nFor every notes field named in that error, set notes to null. "
-                        "Do not move the duplicated text into another notes field or explain the correction in warnings."
-                    )
-            response = chat(
-                model=model,
-                messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": attempt_prompt}],
-                format=schema,
-                think=False,
-                options={
-                    "temperature": config.ollama_temperature,
-                    "num_predict": config.ollama_num_predict,
-                    "num_ctx": config.ollama_num_ctx,
-                },
-            )
-            content = response.message.content
-            parsed = json.loads(content)
-            validate_structured_response(parsed, schema)
-            return parsed
-        except Exception as exc:
-            last = exc
-            retry_issue = str(exc)
-            # Preserve the exact raw model content for every rejected attempt.
-            (debug_dir / f"debug_{tag}_attempt_{attempt}.txt").write_text(content, encoding="utf-8")
-            if attempt <= config.ollama_retries:
-                continue
-    raise RuntimeError(f"{tag} failed after retries: {last}")
-
-
-def build_page_evidence(doc: dict) -> dict[int, list[str]]:
-    pages: dict[int, list[str]] = defaultdict(list)
-    for page_no, items in build_page_items(doc).items():
-        pages[page_no] = [format_page_item(item) for item in items]
-    return dict(sorted(pages.items()))
-
-
-def page_sort_y(prov: dict) -> float:
-    bbox = prov.get("bbox") or {}
-    return float(max(bbox.get("t", 0), bbox.get("b", 0)))
-
-
-def build_page_items(doc: dict) -> dict[int, list[dict]]:
-    pages: dict[int, list[dict]] = defaultdict(list)
-    for item in doc.get("texts", []):
-        text = clean_evidence_text(item.get("text") or item.get("orig") or "")
-        prov = item.get("prov") or []
-        page_no = prov[0].get("page_no") if prov else None
-        if text and page_no:
-            pages[int(page_no)].append({
-                "kind": "text",
-                "label": item.get("label") or "text",
-                "text": text,
-                "sort_y": page_sort_y(prov[0]),
-                "sort_idx": len(pages[int(page_no)]),
-            })
-    for idx, table in enumerate(doc.get("tables", [])):
-        prov = table.get("prov") or []
-        page_no = prov[0].get("page_no") if prov else None
-        if not page_no:
-            continue
-        grid = (table.get("data") or {}).get("grid") or []
-        rows = []
-        for row in grid:
-            vals = []
-            for column, cell in enumerate(row, start=1):
-                raw = (cell.get("text") or "") if isinstance(cell, dict) else str(cell)
-                cleaned = clean_evidence_text(raw)
-                if cleaned:
-                    # Keep original column coordinates while omitting empty cells.
-                    vals.append(f"C{column}: {cleaned}")
-            if vals:
-                rows.append(" ; ".join(vals))
-        if rows:
-            pages[int(page_no)].append({
-                "kind": "table",
-                "label": f"TABLE {idx}",
-                "text": "\n".join(rows),
-                "sort_y": page_sort_y(prov[0]),
-                "sort_idx": len(pages[int(page_no)]),
-            })
-    ordered = {}
-    for page_no, items in pages.items():
-        ordered[page_no] = sorted(items, key=lambda item: (-item["sort_y"], item["sort_idx"]))
-    return dict(sorted(ordered.items()))
-
-
-def clean_evidence_text(text: str | None) -> str:
-    """Remove Docling blank/table residue without discarding meaningful text."""
-    cleaned_lines = []
-    for raw_line in str(text or "").splitlines():
-        line = re.sub(r"[ \t\f\v]+", " ", raw_line).strip()
-        if not line:
-            continue
-        if re.fullmatch(r"(?:\|\s*)+", line):
-            continue
-        if re.fullmatch(r"\|?\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)*\s*\|?", line):
-            continue
-        if "|" in line:
-            cells = [norm(cell) for cell in line.split("|") if norm(cell)]
-            if not cells:
-                continue
-            line = " ; ".join(cells)
-        if not cleaned_lines or line != cleaned_lines[-1]:
-            cleaned_lines.append(line)
-    return " ".join(cleaned_lines)
-
-
-def format_page_item(item: dict) -> str:
-    return f"[{item['label']}] {item['text']}"
-
-
-def render_pages(pages: dict[int, list[str]], nums: list[int]) -> str:
-    out = []
-    for page_no in nums:
-        if page_no in pages:
-            out.append(f"\n===== PAGE {page_no} =====")
-            out.extend(pages[page_no])
-    return "\n".join(out)
-
-
-def flat_page_text(pages: dict[int, list[str]], page_no: int) -> str:
-    return "\n".join(pages.get(page_no, []))
-
-
-def page_text_from_items(items: list[dict]) -> str:
-    return "\n".join(item.get("text", "") for item in items)
-
-
 def canonical_condition_heading(item: dict) -> str | None:
     """Identify a condition heading structurally, without a name allow-list."""
     label = item.get("label")
@@ -425,10 +156,6 @@ def canonical_condition_heading(item: dict) -> str | None:
     if label == "list_item" and (len(clean) > 140 or clean.endswith(".")):
         return None
     return clean
-
-
-def render_page_items(items: list[dict]) -> str:
-    return "\n".join(format_page_item(item) for item in items)
 
 
 def split_condition_sections(page_items: dict[int, list[dict]], page_no: int) -> list[dict]:
@@ -461,27 +188,6 @@ def split_condition_sections(page_items: dict[int, list[dict]], page_no: int) ->
             "evidence": render_page_items(chunk),
         })
     return sections
-
-
-def slugify(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", keytext(text)).strip("_") or "section"
-
-
-def condition_section_is_empty(condition: dict | None) -> bool:
-    if not condition:
-        return True
-    if condition.get("condition_type") or condition.get("scope") or condition.get("description"):
-        return False
-    return len(condition.get("rules") or []) == 0
-
-
-def failure_warning_for_section(page_no: int, heading: str, issue: str) -> dict:
-    return {
-        "field": "policy_conditions.section_extraction",
-        "issue": f'Condition section "{heading}" on page {page_no} failed: {issue}',
-        "severity": "high",
-        "source_page": page_no,
-    }
 
 
 def extract_condition_sections(
