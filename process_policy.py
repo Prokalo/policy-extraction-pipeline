@@ -60,7 +60,7 @@ def dispatch_ramo_branch(
     run_dir: Path,
 ) -> tuple[dict, dict, dict, Path | None]:
     if ramo == "GMM":
-        print("Correclty classified as GMM, moving on to valudation")
+        print("Correclty classified as GMM, moving on to LLM extraction/parsing")
         extracted_data, extraction_report = extract_policy_from_docling(docling_data, config, run_dir)
         extracted_path = run_dir / "02_extracted.json"
         save_json(extracted_data, extracted_path)
@@ -68,7 +68,7 @@ def dispatch_ramo_branch(
         branch_report = {"ramo": ramo, "branch": "gnp_gmm", "status": "completed", **branch_report}
         return parsed_data, branch_report, extraction_report, extracted_path
     if ramo in PLANNED_RAMO_BRANCHES:
-        print(f"Correclty classified as {ramo}, moving on to valudation")
+        print(f"Correclty classified as {ramo}, moving on to LLM extraction/parsing")
         raise PipelineFailure(f"Document routed to {ramo}, but the {ramo} extraction branch is not implemented yet.")
     print("failed to passed classifer")
     raise PipelineFailure(f"Document routed to unsupported branch: {ramo}.")
