@@ -2,6 +2,10 @@
 
 A hybrid extraction pipeline that converts Spanish-language GNP medical insurance policy PDFs into structured, provenance-aware, schema-validated JSON.
 
+## Hermes Workflow Test
+
+This repository supports the Hermes engineering workflow.
+
 The pipeline combines:
 
 - **Docling** for PDF layout and table extraction.
